@@ -2,29 +2,24 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+
+
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>News_Aggregation</artifactId>
+        <artifactId>news-aggregation-common</artifactId>
         <version>0.0.1-SNAPSHOT</version>
-        <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
+    <artifactId>news-aggregation-base</artifactId>
 
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-    </modules>
+    <packaging>jar</packaging>
+    <name>news-aggregation-base</name>
+    <description>Base Common module</description>
 
 
     <properties>
         <java.version>21</java.version>
     </properties>
-
-
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>

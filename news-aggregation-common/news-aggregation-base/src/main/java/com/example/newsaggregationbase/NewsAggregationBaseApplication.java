@@ -1,13 +1,13 @@
-package com.example.news_aggregation;
+package com.example.newsaggregationbase;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class NewsAggregationApplication {
+public class NewsAggregationBaseApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(NewsAggregationApplication.class, args);
+        SpringApplication.run(NewsAggregationBaseApplication.class, args);
     }
 
 }
