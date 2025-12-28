@@ -9,23 +9,14 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
+    <artifactId>news-aggregation-web</artifactId>
 
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-    </modules>
-
+    <name>news-aggregation-web</name>
+    <description>news-aggregation-web</description>
 
     <properties>
         <java.version>21</java.version>
     </properties>
-
-
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -38,15 +29,32 @@
             <scope>test</scope>
         </dependency>
 
+        <!--    Spring Boot Web   -->
         <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+
+
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-cache</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
         <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-base</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.14.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
