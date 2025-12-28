@@ -1,4 +1,4 @@
-package com.example.newsaggregationbase;
+package com.example.news.aggregation.base;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
