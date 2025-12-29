@@ -1,10 +1,10 @@
 package com.example.news.aggregation.web.vo;
 
-import com.example.news-aggregation.base.response.SingleResponse;
+import com.example.news.aggregation.base.response.SingleResponse;
 import lombok.Getter;
 import lombok.Setter;
 
-import static com.example.news-aggregation.base.response.ResponseCode.SUCCESS;
+import static com.example.news.aggregation.base.response.ResponseCode.SUCCESS;
 
 /**
  * @author Hollis

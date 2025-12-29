@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.news.aggregation.news.infrastructure.mapper.NewsMapper">
+
+    <resultMap id="resultNewsMap" type="com.example.news.aggregation.news.domain.entity.News">
+        <!-- 主键 -->
+        <id column="id" property="id" jdbcType="BIGINT"/>
+        
+        <!-- 基础字段 -->
+        <result column="title" property="title" jdbcType="VARCHAR"/>
+        <result column="summary" property="summary" jdbcType="VARCHAR"/>
+        <result column="image_url" property="image_url" jdbcType="VARCHAR"/>
+        <result column="link" property="link" jdbcType="VARCHAR"/>
+        <result column="translation" property="translation" jdbcType="VARCHAR"/>
+        <result column="source" property="source" jdbcType="CHAR"/>
+        <result column="publication_time" property="publication_time" jdbcType="BIGINT"/>
+        <result column="context" property="context" jdbcType="LONGVARCHAR"/>
+        
+        <!-- BaseEntity 继承字段 -->
+        <result column="deleted" property="deleted" jdbcType="TINYINT"/>
+        <result column="lock_version" property="lockVersion" jdbcType="INTEGER"/>
+        <result column="gmt_create" property="gmtCreate" jdbcType="TIMESTAMP"/>
+        <result column="gmt_modified" property="gmtModified" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+
+</mapper>

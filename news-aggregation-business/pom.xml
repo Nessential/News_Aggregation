@@ -9,48 +9,22 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
+    <artifactId>news-aggregation-business</artifactId>
 
-    <artifactId>news-aggregation-common</artifactId>
+    <name>news-aggregation-business</name>
+    <description>news-aggregation-business</description>
+
     <packaging>pom</packaging>
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
 
     <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-        <module>news-aggregation-datasource</module>
+        <module>news-aggregation-news</module>
     </modules>
-
-
     <properties>
+        <application.name>news-aggregation-business</application.name>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-
-
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-        </dependency>
-    </dependencies>
 
     <build>
         <plugins>
