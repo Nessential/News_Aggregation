@@ -18,7 +18,7 @@
     <modules>
         <module>news-aggregation-common</module>
         <module>news-aggregation-web</module>
-
+        <module>news-aggregation-business</module>
     </modules>
 
     <properties>
@@ -43,13 +43,11 @@
                 <scope>test</scope>
             </dependency>
 
-
             <dependency>
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
                 <version>1.18.30</version>
             </dependency>
-
 
             <dependency>
                 <groupId>org.apache.commons</groupId>
@@ -63,6 +61,20 @@
                 <version>32.1.3-jre</version>
             </dependency>
 
+
+
+<!--            各模块的定义-->
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-base</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-datasource</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

@@ -9,6 +9,6 @@ import org.springframework.context.annotation.Configuration;
  * @author Hollis
  */
 @Configuration
-@EnableMethodCache(basePackages = "cn.hollis.nft.turbo")
+@EnableMethodCache(basePackages = "com.example.news.aggregation")
 public class CacheConfiguration {
 }

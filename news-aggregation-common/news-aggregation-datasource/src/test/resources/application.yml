@@ -1,0 +1,14 @@
+# 模拟 base 模块提供的配置变量
+news:
+  aggregation:
+    mysql:
+      url: jdbc:mysql://192.168.1.7:3306/news-aggregation
+      username: root
+      password: wangchuan
+
+# 导入 datasource.yml 进行测试
+spring:
+  config:
+    import: classpath:datasource.yml
+  autoconfigure:
+    exclude: org.apache.shardingsphere.spring.boot.ShardingSphereAutoConfiguration
