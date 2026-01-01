@@ -47,6 +47,7 @@
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
                 <version>1.18.30</version>
+                <scope>compile</scope>
             </dependency>
 
             <dependency>
@@ -73,6 +74,12 @@
             <dependency>
                 <groupId>com.example</groupId>
                 <artifactId>news-aggregation-datasource</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-job</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

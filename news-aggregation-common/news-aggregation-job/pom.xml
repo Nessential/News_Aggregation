@@ -4,23 +4,15 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>News_Aggregation</artifactId>
+        <artifactId>news-aggregation-common</artifactId>
         <version>0.0.1-SNAPSHOT</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
+    <artifactId>news-aggregation-job</artifactId>
 
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>11
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-        <module>news-aggregation-datasource</module>
-        <module>news-aggregation-job</module>
-    </modules>
+    <name>news-aggregation-job</name>
+    <description>news-aggregation-job</description>
 
 
     <properties>
@@ -40,16 +32,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
         </dependency>
     </dependencies>
 

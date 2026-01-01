@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: news-aggregation-news
+
+
+#Rss??
+news:
+  rss:
+    sources:
+      - name: BCC
+        url: https://feeds.bbci.co.uk/news/business/rss.xml
+        category: Business
+
+      - name: BBC
+        url: https://www.bbc.com/culture/feed.rss
+        category: Culture
+
+      - name: BBC
+        url: https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml
+        category: Entertainment
