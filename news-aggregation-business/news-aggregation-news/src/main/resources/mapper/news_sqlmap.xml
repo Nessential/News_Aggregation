@@ -25,4 +25,8 @@
     </resultMap>
 
 
+    <select id="selectByLink" resultMap="resultNewsMap">
+        select * from news where link = #{link} and deleted = 0 limit 1
+    </select>
+
 </mapper>

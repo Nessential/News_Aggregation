@@ -6,7 +6,6 @@
         <groupId>com.example</groupId>
         <artifactId>news-aggregation-business</artifactId>
         <version>0.0.1-SNAPSHOT</version>
-        <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
     <artifactId>news-aggregation-news</artifactId>
@@ -31,6 +30,26 @@
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-datasource</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-job</artifactId>
+        </dependency>
+
+<!--        rss解析-->
+        <!-- news-aggregation-news/pom.xml -->
+        <dependency>
+            <groupId>com.rometools</groupId>
+            <artifactId>rome</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+
+        <!-- 测试依赖 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
 
     </dependencies>
