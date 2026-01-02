@@ -21,11 +21,11 @@
 
     <dependencies>
 
+<!--        模块导入-->
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-base</artifactId>
         </dependency>
-
 
         <dependency>
             <groupId>com.example</groupId>
@@ -37,6 +37,12 @@
             <artifactId>news-aggregation-job</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-storage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
 <!--        rss解析-->
         <!-- news-aggregation-news/pom.xml -->
         <dependency>
@@ -44,7 +50,11 @@
             <artifactId>rome</artifactId>
             <version>2.1.0</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.rometools</groupId>
+            <artifactId>rome-modules</artifactId>
+            <version>2.1.0</version>
+        </dependency>
         <!-- 测试依赖 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

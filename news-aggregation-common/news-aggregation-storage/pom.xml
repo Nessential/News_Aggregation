@@ -4,33 +4,22 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>News_Aggregation</artifactId>
+        <artifactId>news-aggregation-common</artifactId>
         <version>0.0.1-SNAPSHOT</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
+    <artifactId>news-aggregation-storage</artifactId>
 
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>11
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-        <module>news-aggregation-datasource</module>
-        <module>news-aggregation-job</module>
-        <module>news-aggregation-storage</module>
-    </modules>
-
+    <name>news-aggregation-storage</name>
+    <description>news-aggregation-storage</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <minio.version>8.5.7</minio.version>
     </properties>
-
-
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -43,14 +32,17 @@
             <scope>test</scope>
         </dependency>
 
+
         <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-base</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
         </dependency>
     </dependencies>
 

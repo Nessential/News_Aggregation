@@ -18,3 +18,13 @@ news:
       - name: BBC
         url: https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml
         category: Entertainment
+
+
+storage:
+  minio:
+    endpoint: http://192.168.1.10:9001
+    access-key: admin
+    secret-key: 12345678
+    bucket: news-image
+    connect-timeout: 10000
+    read-timeout: 30000
