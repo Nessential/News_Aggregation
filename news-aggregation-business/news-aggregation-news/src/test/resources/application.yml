@@ -2,7 +2,7 @@
 news:
   aggregation:
     mysql:
-      url: jdbc:mysql://192.168.1.7:3306/news-aggregation
+      url: jdbc:mysql://192.168.1.10:3306/news-aggregation
       username: root
       password: wangchuan
   rss:
@@ -21,3 +21,12 @@ spring:
 # MyBatis 配置
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
+
+storage:
+  minio:
+    endpoint: http://192.168.1.10:9000
+    access-key: admin
+    secret-key: 12345678
+    bucket: news-image
+    connect-timeout: 10000
+    read-timeout: 30000

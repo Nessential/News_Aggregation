@@ -2,7 +2,7 @@
 news:
   aggregation:
     mysql:
-      url: jdbc:mysql://192.168.1.7:3306/news-aggregation
+      url: jdbc:mysql://192.168.1.10:3306/news-aggregation
       username: root
       password: wangchuan
 

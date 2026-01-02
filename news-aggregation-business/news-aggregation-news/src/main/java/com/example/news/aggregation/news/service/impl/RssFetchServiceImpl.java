@@ -6,8 +6,10 @@ import com.example.news.aggregation.news.exception.NewsException;
 import com.example.news.aggregation.news.infrastructure.mapper.NewsMapper;
 import com.example.news.aggregation.news.infrastructure.rss.RssParser;
 import com.example.news.aggregation.news.service.RssFetchService;
+import com.example.news.aggregation.storage.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,6 +24,8 @@ public class RssFetchServiceImpl implements RssFetchService {
     private final RssParser rssParser;
     private final NewsMapper newsMapper;
 
+    @Autowired
+    private StorageService storageService;
 
     @Override
     public void fetchAndSaveNews() {
@@ -68,6 +72,11 @@ public class RssFetchServiceImpl implements RssFetchService {
                     continue;
                 }
                 else {
+//                    保存图片
+                    String originImageUrl = news.getImage_url();
+                    String finalImageUrl = storageService.uploadFromUrl(originImageUrl,source.getName(),news.getTitle());
+                    news.setImage_url(finalImageUrl);
+
                     newsMapper.insert(news);
                     saved++;
                 }
