@@ -5,6 +5,8 @@ import com.example.news.aggregation.news.domain.entity.News;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 @Mapper
 public interface NewsMapper extends BaseMapper<News> {
 
@@ -17,4 +19,5 @@ public interface NewsMapper extends BaseMapper<News> {
 
     News selectByLink(@Param("link") String link);
 
+    List<News> selectForTranslation(int batchSize);
 }

@@ -12,11 +12,16 @@
         <result column="summary" property="summary" jdbcType="VARCHAR"/>
         <result column="image_url" property="image_url" jdbcType="VARCHAR"/>
         <result column="link" property="link" jdbcType="VARCHAR"/>
-        <result column="translation" property="translation" jdbcType="VARCHAR"/>
         <result column="source" property="source" jdbcType="CHAR"/>
         <result column="publication_time" property="publication_time" jdbcType="BIGINT"/>
         <result column="context" property="context" jdbcType="LONGVARCHAR"/>
-        
+
+        <result column="context_cn" property="context_cn" jdbcType="LONGVARCHAR"/>
+        <result column="title_cn" property="title_cn" jdbcType="VARCHAR"/>
+        <result column="summary_cn" property="summary_cn" jdbcType="LONGVARCHAR"/>
+
+        <result column="content_status" property="content_status" jdbcType="TINYINT"/>
+        <result column="translation_status" property="translation_status" jdbcType="TINYINT"/>
         <!-- BaseEntity 继承字段 -->
         <result column="deleted" property="deleted" jdbcType="TINYINT"/>
         <result column="lock_version" property="lockVersion" jdbcType="INTEGER"/>
@@ -27,6 +32,16 @@
 
     <select id="selectByLink" resultMap="resultNewsMap">
         select * from news where link = #{link} and deleted = 0 limit 1
+    </select>
+
+
+    <!-- 查询待翻译的新闻（正文已抓取成功，翻译未完成） -->
+    <select id ="selectForTranslate" resultMap="resultNewsMap">
+        select * from news where content_status = 1
+        and translate_status =0
+        and deleted = 0
+        order by gmt_create asc
+        limit #{limit}
     </select>
 
 </mapper>

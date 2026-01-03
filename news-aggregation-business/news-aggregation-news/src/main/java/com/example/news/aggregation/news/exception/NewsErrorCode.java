@@ -14,8 +14,10 @@ public enum NewsErrorCode implements ErrorCode {
     RSS_SOURCE_NOT_FOUND("RSS_SOURCE_NOT_FOUND", "RSS 源不存在"),
     RSS_NETWORK_ERROR("RSS_NETWORK_ERROR", "RSS 源网络请求失败"),
     NEWS_SAVE_FAILED("NEWS_SAVE_FAILED", "新闻保存失败"),
-    NEWS_NOT_FOUND("NEWS_NOT_FOUND", "新闻不存在");
-
+    NEWS_NOT_FOUND("NEWS_NOT_FOUND", "新闻不存在"),
+    CONTENT_FETCH_FAILED("CONTENT_FETCH_FAILED", "正文抓取失败"),
+    TRANSLATION_FAILED("TRANSLATION_FAILED", "翻译失败"),
+    TRANSLATION_API_ERROR("TRANSLATION_API_ERROR", "翻译API调用失败");
     private final String code;
     private final String message;
 

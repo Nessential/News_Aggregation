@@ -1,6 +1,5 @@
 package com.example.news.aggregation.news.domain.entity;
 
-
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.example.news.aggregation.datasource.domain.entity.BaseEntity;
 import lombok.Getter;
@@ -22,9 +21,19 @@ public class News extends BaseEntity {
     private String title;
 
     /**
+     * 中文标题
+     */
+    private String title_cn;
+
+    /**
      * 新闻摘要
      */
     private String summary;
+
+    /**
+     * 中文摘要
+     */
+    private String summary_cn;
 
     /**
      * 新闻图片url
@@ -37,11 +46,6 @@ public class News extends BaseEntity {
     private String link;
 
     /**
-     * 新闻翻译
-     */
-    private String translation;
-
-    /**
      * 新闻来源
      */
     private String source;
@@ -52,7 +56,22 @@ public class News extends BaseEntity {
     private Long publication_time;
 
     /**
-     * 压缩后的正文
+     * 新闻正文
      */
     private String context;
+
+    /**
+     * 中文正文
+     */
+    private String context_cn;
+
+    /**
+     * 正文状态：0-待抓取，1-成功，2-失败
+     */
+    private Integer content_status;
+
+    /**
+     * 翻译状态：0-待翻译，1-成功，2-失败
+     */
+    private Integer translation_status;
 }

@@ -113,14 +113,11 @@ public class RssParser {
         imageUrl = extractFromEnclosures(entry);
 
         if(imageUrl==null){
-            log.info("使用extractFromEnclosures 失败");
             imageUrl = extractFromMedia(entry);
             if(imageUrl!=null){
-                log.info("使用extractFromMedia 获取图片成功");
                 return imageUrl;
             }
         }
-        log.info("使用extractFromEnclosures 成功");
 
         return imageUrl;
     }
