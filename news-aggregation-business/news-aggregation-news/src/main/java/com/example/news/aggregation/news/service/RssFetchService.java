@@ -13,4 +13,9 @@ public interface RssFetchService {
      */
     void fetchAndSaveNews();
 
+    /**
+     * 获取待翻译的新闻
+     */
+    void selectForTranslate();
+
 }

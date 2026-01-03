@@ -28,3 +28,9 @@ storage:
     bucket: news-image
     connect-timeout: 10000
     read-timeout: 30000
+
+translate:
+  baidu:
+    app-id: 20230107001522986
+    secret-key: fYkUpOMbbT6m8_YOLJLy
+    api-url: https://fanyi-api.baidu.com/api/trans/vip/translate
