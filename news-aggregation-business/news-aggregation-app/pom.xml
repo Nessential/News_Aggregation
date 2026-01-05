@@ -4,34 +4,43 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>News_Aggregation</artifactId>
+        <artifactId>news-aggregation-business</artifactId>
         <version>0.0.1-SNAPSHOT</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
-
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>11
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-        <module>news-aggregation-datasource</module>
-        <module>news-aggregation-job</module>
-        <module>news-aggregation-storage</module>
-    </modules>
-
+    <artifactId>news-aggregation-app</artifactId>
+    <name>new-aggregation-app</name>
+    <description>new-aggregation-app</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-
-
     <dependencies>
+        <!-- Web公共组件 -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-web</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- 业务模块 -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-news</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- 定时任务 -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-job</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
@@ -41,22 +50,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>cn.hutool</groupId>
-            <artifactId>hutool-all</artifactId>
-            <version>5.8.22</version>
         </dependency>
     </dependencies>
 

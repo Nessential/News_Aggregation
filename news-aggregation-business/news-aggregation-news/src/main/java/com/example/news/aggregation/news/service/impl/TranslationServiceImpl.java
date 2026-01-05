@@ -22,7 +22,7 @@ public class TranslationServiceImpl implements TranslationService {
     private final BaiduTranslateClient translateClient;
 
     // 百度翻译API QPS限制，免费版1次/秒
-    private static final long TRANSLATE_INTERVAL_MS = 1100;
+    private static final long TRANSLATE_INTERVAL_MS =  1000;
 
     @Override
     public void translatePendingNews(int batchSize) {

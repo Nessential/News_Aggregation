@@ -36,9 +36,9 @@
 
 
     <!-- 查询待翻译的新闻（正文已抓取成功，翻译未完成） -->
-    <select id ="selectForTranslate" resultMap="resultNewsMap">
+    <select id ="selectForTranslation" resultMap="resultNewsMap">
         select * from news where content_status = 1
-        and translate_status =0
+        and translation_status =0
         and deleted = 0
         order by gmt_create asc
         limit #{limit}

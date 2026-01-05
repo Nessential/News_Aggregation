@@ -18,6 +18,7 @@
 
     <modules>
         <module>news-aggregation-news</module>
+        <module>news-aggregation-app</module>
     </modules>
     <properties>
         <application.name>news-aggregation-business</application.name>

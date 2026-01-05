@@ -480,7 +480,7 @@ NFTurbo (根项目)
 
 ### 3.7 应用服务
 
-#### **nft-turbo-app**
+#### **nft-turbo-PROJECT_STRUCTURE.md **
 **职责：** 主应用服务（聚合服务）
 - 整合多个业务模块
 - 提供统一的业务接口
@@ -841,3 +841,49 @@ server:
 **文档版本**: 1.0  
 **最后更新**: 2024  
 **维护者**: NFTurbo Team
+【模式：研究 模型：Claude】
+
+## 配置文件统一管理方式
+
+项目使用 **Spring Boot 的 `spring.config.import`** 机制统一管理配置：
+
+### 1. 配置分层结构
+
+```
+nft-turbo-common/
+├── nft-turbo-base/src/main/resources/base.yml        # 基础变量定义
+├── nft-turbo-datasource/src/main/resources/datasource.yml  # 数据源配置
+├── nft-turbo-cache/src/main/resources/cache.yml      # Redis配置
+├── nft-turbo-job/src/main/resources/job.yml          # XXL-Job配置
+├── nft-turbo-rpc/src/main/resources/rpc.yml          # Dubbo配置
+├── nft-turbo-mq/src/main/resources/stream.yml        # RocketMQ配置
+├── nft-turbo-seata/src/main/resources/seata.yml      # Seata配置
+└── ...
+```
+
+### 2. 业务模块导入方式
+
+```yaml
+# application.yml
+spring:
+  config:
+    import: classpath:base.yml,classpath:datasource-sharding.yml,classpath:rpc.yml,classpath:cache.yml,classpath:job.yml,classpath:stream.yml
+```
+
+### 3. 配置加载流程
+
+```
+base.yml (定义变量: nft.turbo.mysql.url, nft.turbo.redis.host 等)
+    ↓
+datasource.yml (使用变量: ${nft.turbo.mysql.url})
+cache.yml (使用变量: ${nft.turbo.redis.host})
+job.yml (使用变量: ${nft.turbo.xxl-job.url})
+    ↓
+application.yml (业务模块特有配置 + import 公共配置)
+```
+
+### 4. 优点
+
+- **集中管理**：环境变量在 `base.yml` 统一定义
+- **按需引入**：业务模块只导入需要的配置
+- **解耦**：各组件配置独立维护

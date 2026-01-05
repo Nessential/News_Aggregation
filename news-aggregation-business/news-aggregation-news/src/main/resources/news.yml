@@ -1,0 +1,14 @@
+# RSS源配置
+news:
+  rss:
+    sources:
+      - name: BBC Business
+        url: https://feeds.bbci.co.uk/news/business/rss.xml
+        category: Business
+
+# 百度翻译配置
+translate:
+  baidu:
+    app-id: ${news.aggregation.translate.baidu.app-id}
+    secret-key: ${news.aggregation.translate.baidu.secret-key}
+    api-url: https://fanyi-api.baidu.com/api/trans/vip/translate

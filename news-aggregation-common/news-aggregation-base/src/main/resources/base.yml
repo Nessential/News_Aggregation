@@ -1,0 +1,32 @@
+# 基础变量定义 - 所有中间件连接地址集中管理
+news:
+  aggregation:
+    # MySQL配置
+    mysql:
+      url: jdbc:mysql://192.168.1.10:3306/news-aggregation
+      username: root
+      password: wangchuan
+    # Redis配置
+    redis:
+      host: 192.168.1.10
+      port: 6379
+      password: ''
+    # XXL-Job配置
+    xxl-job:
+      admin-addresses: http://127.0.0.1:8090/xxl-job-admin
+      access-token: default_token
+      executor-appname: news-aggregation-executor
+      executor-port: 9999
+      executor-ip: 192.168.1.10
+      admin-timeout: 3
+    # MinIO配置
+    minio:
+      endpoint: http://192.168.1.10:9000
+      access-key: admin
+      secret-key: 12345678
+      bucket: news-image
+    # 百度翻译配置
+    translate:
+      baidu:
+        app-id: ${BAIDU_TRANSLATE_APP_ID:your-app-id}
+        secret-key: ${BAIDU_TRANSLATE_SECRET_KEY:your-secret-key}
