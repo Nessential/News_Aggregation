@@ -216,9 +216,9 @@ public class MinioStorageServiceImpl implements StorageService {
             return "unnamed";
         }
         // 移除非法字符，保留中文、字母、数字、下划线、连字符
-        return fileName.replaceAll("[^\\u4e00-\\u9fa5a-zA-Z0-9_-]", "_")
-                .replaceAll("_+", "_")
-                .substring(0, Math.min(fileName.length(), 50)); // 限制长度
-
+        String sanitized = fileName.replaceAll("[^\\u4e00-\\u9fa5a-zA-Z0-9_-]", "_")
+                .replaceAll("_+", "_");
+        // 限制长度（使用处理后的字符串长度）
+        return sanitized.substring(0, Math.min(sanitized.length(), 50));
     }
 }

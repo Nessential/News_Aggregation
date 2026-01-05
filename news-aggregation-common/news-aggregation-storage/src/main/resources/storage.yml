@@ -1,0 +1,8 @@
+storage:
+  minio:
+    endpoint: ${news.aggregation.minio.endpoint}
+    access-key: ${news.aggregation.minio.access-key}
+    secret-key: ${news.aggregation.minio.secret-key}
+    bucket: ${news.aggregation.minio.bucket}
+    connect-timeout: 10000
+    read-timeout: 30000

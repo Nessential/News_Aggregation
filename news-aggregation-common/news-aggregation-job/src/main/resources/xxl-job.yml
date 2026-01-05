@@ -1,0 +1,13 @@
+xxl:
+  job:
+    admin:
+      addresses: ${news.aggregation.xxl-job.admin-addresses}
+      timeout: ${news.aggregation.xxl-job.admin-timeout}
+    accessToken: ${news.aggregation.xxl-job.access-token}
+    executor:
+      appname: ${news.aggregation.xxl-job.executor-appname}
+      address:
+      ip: ${news.aggregation.xxl-job.executor-ip}
+      port: ${news.aggregation.xxl-job.executor-port}
+      logpath: ./logs/xxl-job/jobhandler
+      logretentiondays: 30

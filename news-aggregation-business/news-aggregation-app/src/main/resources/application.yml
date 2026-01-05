@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: news-aggregation-app
+  config:
+    import:
+      - classpath:base.yml
+      - classpath:datasource.yml
+      - classpath:xxl-job.yml
+      - classpath:storage.yml
+      - classpath:news.yml
+
+server:
+  port: 8080
+
+# MyBatis配置
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
