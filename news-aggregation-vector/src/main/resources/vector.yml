@@ -1,0 +1,15 @@
+# Vector 模块配置
+vector:
+  qdrant:
+    # Qdrant服务器主机地址，从 base.yml 中的配置获取
+    host: ${news.aggregation.qdrant.host}
+    # Qdrant服务器端口，从 base.yml 中的配置获取
+    port: ${news.aggregation.qdrant.port}
+    # 是否使用TLS连接，从 base.yml 中的配置获取
+    use-tls: ${news.aggregation.qdrant.use-tls}
+    # 默认集合名称，从 base.yml 中的配置获取
+    collection-name: ${news.aggregation.qdrant.collection-name}
+    # 向量维度大小，从 base.yml 中的配置获取
+    vector-size: ${news.aggregation.qdrant.vector-size}
+    # API密钥（可选），从 base.yml 中的配置获取
+    api-key: ${news.aggregation.qdrant.api-key}

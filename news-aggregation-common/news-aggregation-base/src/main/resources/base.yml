@@ -42,3 +42,11 @@ news:
         chunk-size: 500
         chunk-overlap: 50
         min-chunk-size: 100
+    # Qdrant向量数据库配置
+    qdrant:
+      host: localhost
+      port: 6334
+      use-tls: false
+      collection-name: news_vectors
+      vector-size: 2048
+      api-key: ${QDRANT_API_KEY:}

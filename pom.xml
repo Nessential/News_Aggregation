@@ -19,6 +19,8 @@
         <module>news-aggregation-common</module>
         <module>news-aggregation-web</module>
         <module>news-aggregation-business</module>
+        <module>news-aggregation-vector</module>
+        <module>news-aggregation-embedding</module>
     </modules>
 
     <properties>

@@ -1,7 +1,6 @@
 package com.example.news.aggregation.embedding.job;
 
 import com.example.news.aggregation.embedding.service.EmbeddingService;
-import com.xxl.job.core.context.XxlJobHelper;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
