@@ -1,0 +1,21 @@
+# Embedding 模块配置
+embedding:
+  zhipu:
+    # 智谱 AI API 密钥，从环境变量获取
+    api-key: c91f73f0b0374d1fa7b6526965539205.J75Uxhm4cScWmT6l
+    # 智谱 AI API 基础 URL
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    # 使用的 embedding 模型名称
+    model: embedding-3
+    # 向量维度大小
+    dimensions: 2048
+    # HTTP 连接超时时间（毫秒）
+    connect-timeout: 10000
+    # HTTP 读取超时时间（毫秒）
+    read-timeout: 30000
+    # 文本分段大小（字符数）
+    chunk-size: 500
+    # 相邻分段重叠字符数，用于保持上下文连贯性
+    chunk-overlap: 50
+    # 最小分段大小，小于此值的分段会被合并
+    min-chunk-size: 100

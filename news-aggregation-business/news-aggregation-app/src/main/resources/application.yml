@@ -9,6 +9,7 @@ spring:
       - classpath:storage.yml
       - classpath:news.yml
       - classpath:embedding.yml
+      - classpath:vector.yml
 
 server:
   port: 8080

@@ -11,7 +11,7 @@
 
 
     <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>11
+    <packaging>pom</packaging>
     <name>news-aggregation-common</name>
     <description>Common Modules Parent POM</description>
 
