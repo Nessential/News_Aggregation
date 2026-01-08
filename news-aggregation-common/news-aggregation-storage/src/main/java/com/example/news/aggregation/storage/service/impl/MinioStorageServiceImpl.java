@@ -37,6 +37,14 @@ public class MinioStorageServiceImpl implements StorageService {
 
     @PostConstruct //    Bean 创建完成、依赖注入完成后自动执行一次。
     public void init(){
+        // 打印配置信息用于排查问题
+        log.info("MinIO 配置加载:");
+        log.info("  endpoint: {}", properties.getEndpoint());
+        log.info("  accessKey: {}", properties.getAccessKey());
+        log.info("  bucket: {}", properties.getBucket());
+        log.info("  connectTimeout: {}", properties.getConnectTimeout());
+        log.info("  readTimeout: {}", properties.getReadTimeout());
+        
         this.minioClient = MinioClient.builder().endpoint(properties.getEndpoint()).credentials(properties.getAccessKey(),properties.getSecretKey()).build();
         minioClient.setTimeout(properties.getConnectTimeout(), properties.getReadTimeout(), properties.getReadTimeout());
         ensureBucketExist(minioClient, properties.getBucket());
