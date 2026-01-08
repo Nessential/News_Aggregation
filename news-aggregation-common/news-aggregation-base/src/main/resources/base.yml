@@ -30,3 +30,15 @@ news:
       baidu:
         app-id: ${BAIDU_TRANSLATE_APP_ID:your-app-id}
         secret-key: ${BAIDU_TRANSLATE_SECRET_KEY:your-secret-key}
+    # 智谱AI Embedding配置
+    embedding:
+      zhipu:
+        api-key: ${ZHIPU_API_KEY}
+        base-url: https://open.bigmodel.cn/api/paas/v4
+        model: embedding-3
+        dimensions: 2048
+        connect-timeout: 10000
+        read-timeout: 30000
+        chunk-size: 500
+        chunk-overlap: 50
+        min-chunk-size: 100

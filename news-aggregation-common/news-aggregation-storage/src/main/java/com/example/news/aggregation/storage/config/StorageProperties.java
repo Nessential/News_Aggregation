@@ -15,7 +15,7 @@ public class StorageProperties {
     /**
      * MinIO 服务地址
      */
-    private String endpoint = "http://192.168.1.10:9001";
+    private String endpoint = "http://192.168.1.10:9002";
 
     /**
      * 访问密钥

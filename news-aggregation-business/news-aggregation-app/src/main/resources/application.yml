@@ -8,6 +8,7 @@ spring:
       - classpath:xxl-job.yml
       - classpath:storage.yml
       - classpath:news.yml
+      - classpath:embedding.yml
 
 server:
   port: 8080
