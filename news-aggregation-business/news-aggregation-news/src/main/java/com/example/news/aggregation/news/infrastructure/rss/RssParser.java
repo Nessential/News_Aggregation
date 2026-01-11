@@ -45,7 +45,7 @@ public class RssParser {
     private static final int CONNECT_TIMEOUT = 15000;
     private static final int READ_TIMEOUT = 30000;
 
-    public List<News> parse(String rssUrl, String sourceName) {
+    public List<News> parse(String rssUrl, String sourceName,String category) {
 
         List<News> newsList = new ArrayList<>();
 
@@ -67,6 +67,7 @@ public class RssParser {
                 news.setSummary(entry.getDescription().getValue());
                  news.setSource(sourceName);
                 news.setLink(entry.getLink());
+                news.setCategory(category);
 
 //                发布时间
                 if (entry.getPublishedDate() != null) {

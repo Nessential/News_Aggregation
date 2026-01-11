@@ -9,6 +9,7 @@ import com.example.news.aggregation.vector.service.VectorStoreService;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Collections.Distance;
 import io.qdrant.client.grpc.Collections.VectorParams;
+import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.Condition;
 import io.qdrant.client.grpc.Points.FieldCondition;
 import io.qdrant.client.grpc.Points.Filter;
@@ -80,8 +81,8 @@ public class QdrantVectorStoreServiceImpl implements VectorStoreService {
             List<PointStruct> pointStructs = points.stream()
                     .map(this::toPointStruct)
                     .collect(Collectors.toList());
-            qdrantClient.upsertAsync(collectionName, pointStructs).get();
-            log.info("向量插入成功: collection={}, count={}", collectionName, points.size());
+            Points.UpdateResult updateResult = qdrantClient.upsertAsync(collectionName, pointStructs).get();
+            log.info("向量插入成功: collection={}, count={},result={}", collectionName, points.size(),updateResult);
         } catch (InterruptedException | ExecutionException e) {
             log.error("向量插入失败: collection={}", collectionName, e);
             throw new VectorException("向量插入失败", e, VectorErrorCode.UPSERT_FAILED);

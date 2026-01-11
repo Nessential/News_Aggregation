@@ -36,3 +36,20 @@ translate:
     app-id: 20230107001522986
     secret-key: fYkUpOMbbT6m8_YOLJLy
     api-url: https://fanyi-api.baidu.com/api/trans/vip/translate
+
+# XXL-Job 配置（测试环境用假值）
+xxl:
+  job:
+    admin:
+      addresses: http://localhost:8090/xxl-job-admin
+    executor:
+      appname: news-aggregation-test
+      port: 9999
+      logpath: ./logs/xxl-job
+      logretentiondays: 30
+    accessToken: test-token
+
+# 向量化配置
+story:
+  time-window-days: 7
+  similarity-threshold: 0.90
