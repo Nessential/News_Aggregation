@@ -25,10 +25,16 @@ public class SimpleTextChunker implements TextChunker {
 
     @Override
     public List<TextChunk> chunk(String text, int chunkSize, int overlap) {
+        log.info("开始文本切块");
         List<TextChunk> chunks = new ArrayList<>();
 
         if (text == null || text.trim().isEmpty()) {
             return chunks;
+        }
+        
+        // 参数验证：防止无限循环
+        if (overlap >= chunkSize) {
+            throw new IllegalArgumentException("overlap (" + overlap + ") must be < chunkSize (" + chunkSize + ")");
         }
 
         text = text.trim().replaceAll("\\s+", " ");
@@ -59,9 +65,11 @@ public class SimpleTextChunker implements TextChunker {
             String chunkText = text.substring(start, end).trim();
 
             if (end >= text.length() && chunkText.length() < properties.getMinChunkSize() && !chunks.isEmpty()) {
+                // 合并到上一个 chunk 后直接退出，避免无限循环
                 TextChunk lastChunk = chunks.get(chunks.size() - 1);
                 lastChunk.setText(lastChunk.getText() + " " + chunkText);
                 lastChunk.setEndOffset(end);
+                break;
             } else if (!chunkText.isEmpty()) {
                 chunks.add(TextChunk.builder()
                         .index(index++)
@@ -71,13 +79,23 @@ public class SimpleTextChunker implements TextChunker {
                         .build());
             }
 
-            start = end - overlap;
-            if (start <= chunks.get(chunks.size() - 1).getStartOffset()) {
-                start = end;
+            // 计算下一个起始位置
+            int nextStart = end - overlap;
+            
+            // 确保不会后退或停滞
+            if (!chunks.isEmpty() && nextStart <= chunks.get(chunks.size() - 1).getStartOffset()) {
+                nextStart = end;
             }
+            
+            // 防御性检查：确保至少前进 1 个字符
+            if (nextStart <= start) {
+                nextStart = start + 1;
+            }
+            
+            start = nextStart;
         }
 
-        log.debug("文本分段完成: 原文长度={}, chunk数量={}", text.length(), chunks.size());
+        log.info("文本分段完成: 原文长度={}, chunk数量={}", text.length(), chunks.size());
         return chunks;
     }
 

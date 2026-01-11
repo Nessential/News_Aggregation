@@ -12,3 +12,21 @@ translate:
     app-id: ${news.aggregation.translate.baidu.app-id}
     secret-key: ${news.aggregation.translate.baidu.secret-key}
     api-url: https://fanyi-api.baidu.com/api/trans/vip/translate
+
+
+# Story 归簇配置
+story:
+  time-window-days: 7           # 时间窗口（天）
+  similarity-threshold: 0.90     # 相似度阈值
+
+# Embedding 配置
+embedding:
+  chunk-size: 500               # chunk 大小（字符）
+  chunk-overlap: 50             # 重叠大小（字符）
+  min-chunk-size: 100           # 最小 chunk（字符）
+
+# Qdrant 配置
+vector:
+  host: localhost
+  port: 6333
+  vector-size: 2048

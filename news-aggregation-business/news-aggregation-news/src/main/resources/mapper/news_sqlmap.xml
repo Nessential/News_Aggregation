@@ -22,6 +22,12 @@
 
         <result column="content_status" property="content_status" jdbcType="TINYINT"/>
         <result column="translation_status" property="translation_status" jdbcType="TINYINT"/>
+        
+        <!-- 向量化相关字段 -->
+        <result column="vector_status" property="vector_status" jdbcType="TINYINT"/>
+        <result column="canonical_id" property="canonical_id" jdbcType="VARCHAR"/>
+        <result column="canonical_status" property="canonical_status" jdbcType="TINYINT"/>
+        
         <!-- BaseEntity 继承字段 -->
         <result column="deleted" property="deleted" jdbcType="TINYINT"/>
         <result column="lock_version" property="lockVersion" jdbcType="INTEGER"/>
@@ -43,5 +49,17 @@
         order by gmt_create asc
         limit #{batchSize}
     </select>
+
+
+<!--    查找翻译完成，但是还没向量化的新闻数据-->
+    <select id="selectForVectorization" resultMap="resultNewsMap">
+      SELECT * FROM news
+    WHERE deleted = 0
+      AND translation_status = 1
+       AND (vector_status IS NULL OR vector_status = 0)
+     ORDER BY id ASC
+     LIMIT #{batchSize}
+
+ </select>
 
 </mapper>

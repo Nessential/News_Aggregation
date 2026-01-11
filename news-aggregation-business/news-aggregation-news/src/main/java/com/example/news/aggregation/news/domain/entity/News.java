@@ -65,6 +65,13 @@ public class News extends BaseEntity {
      */
     private String context_cn;
 
+
+    /**
+     * 新闻分类
+     */
+    private String category;
+
+
     /**
      * 正文状态：0-待抓取，1-成功，2-失败
      */
@@ -74,4 +81,20 @@ public class News extends BaseEntity {
      * 翻译状态：0-待翻译，1-成功，2-失败
      */
     private Integer translation_status;
+
+    /**
+     * 向量化状态：0-待向量化，1-成功，2-失败
+     */
+    private Integer vector_status;
+
+    /**
+     * Story ID，用于同题去重
+     */
+    private String canonical_id;
+
+
+    /**
+     * 归簇状态：0-待归簇，1-已归簇，2-失败
+     */
+    private Integer canonical_status;
 }

@@ -64,7 +64,7 @@ public class RssFetchServiceImpl implements RssFetchService {
 
     private int fetchSingleSource(RssSourceProperties.RssSource source){
         log.info("开始抓取Rss源:{}",source.getName());
-        List<News> newsList = rssParser.parse(source.getUrl(),source.getName());
+        List<News> newsList = rssParser.parse(source.getUrl(),source.getName(), source.getCategory());
 
         int saved = 0;
 
