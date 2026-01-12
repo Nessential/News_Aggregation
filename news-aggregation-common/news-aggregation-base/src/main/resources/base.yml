@@ -50,3 +50,10 @@ news:
       collection-name: news_vectors
       vector-size: 2048
       api-key: ${QDRANT_API_KEY:}
+    # Elasticsearch配置
+    elasticsearch:
+      host: localhost
+      port: 9200
+      username: ''
+      password: ''
+      index-name: news

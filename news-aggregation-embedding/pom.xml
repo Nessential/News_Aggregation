@@ -5,6 +5,7 @@
         <groupId>com.example</groupId>
         <artifactId>news-aggregation-common</artifactId>
         <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../news-aggregation-common/pom.xml</relativePath>
     </parent>
 
     <artifactId>news-aggregation-embedding</artifactId>

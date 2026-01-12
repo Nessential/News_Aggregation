@@ -64,7 +64,11 @@
                 <version>32.1.3-jre</version>
             </dependency>
 
-
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-es</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
 <!--            各模块的定义-->
             <dependency>

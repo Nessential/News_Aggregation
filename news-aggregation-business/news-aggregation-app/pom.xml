@@ -6,7 +6,7 @@
         <groupId>com.example</groupId>
         <artifactId>news-aggregation-business</artifactId>
         <version>0.0.1-SNAPSHOT</version>
-        <relativePath/> <!-- lookup parent from repository -->
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>news-aggregation-app</artifactId>
@@ -53,6 +53,8 @@
             <artifactId>news-aggregation-vector</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+
 
         <!-- Spring Boot -->
         <dependency>
