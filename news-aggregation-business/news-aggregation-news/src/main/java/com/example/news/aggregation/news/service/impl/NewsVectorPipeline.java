@@ -1,6 +1,7 @@
 package com.example.news.aggregation.news.service.impl;
 
 import com.example.news.aggregation.news.domain.entity.News;
+import com.example.news.aggregation.news.infrastructure.es.NewsElasticsearchAdapter;
 import com.example.news.aggregation.news.infrastructure.mapper.NewsMapper;
 import com.example.news.aggregation.news.infrastructure.story.StoryMatcher;
 import lombok.RequiredArgsConstructor;
@@ -19,12 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class NewsVectorPipeline {
 
 
-
+    private final NewsElasticsearchAdapter newsEsAdapter;
 
     private final StoryMatcher storyMatcher;
     private final TopicVectorService topicVectorService;
     private final NewsMapper newsMapper;
     private final ChunkVectorService chunkVectorService;
+
+
     @Transactional(rollbackFor = Exception.class)
     public void processNews(News news){
         try{
@@ -39,6 +42,11 @@ public class NewsVectorPipeline {
             // 3. 生成 Chunk 向量（此时已有 canonical_id）
             generateChunkVectors(news);
 
+            // 3. 同步到 ES
+            newsEsAdapter.indexNews(news);
+            news.setEs_indexed(1);
+
+
             news.setVector_status(1);
             newsMapper.updateById(news);
 
@@ -48,6 +56,7 @@ public class NewsVectorPipeline {
             log.error("新闻处理失败: newsId={}", news.getId(), e);
             news.setVector_status(2);
             news.setCanonical_status(2);
+            news.setEs_indexed(0); // 标记 ES 索引失败
             newsMapper.updateById(news);
             throw e;
         }

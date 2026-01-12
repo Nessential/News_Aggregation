@@ -97,4 +97,9 @@ public class News extends BaseEntity {
      * 归簇状态：0-待归簇，1-已归簇，2-失败
      */
     private Integer canonical_status;
+
+    /**
+     * ES索引状态:0-未索引,1-已索引
+     */
+    private Integer es_indexed;
 }

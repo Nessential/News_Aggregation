@@ -4,34 +4,17 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>News_Aggregation</artifactId>
+        <artifactId>news-aggregation-common</artifactId>
         <version>0.0.1-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-
-
-    <artifactId>news-aggregation-common</artifactId>
-    <packaging>pom</packaging>
-    <name>news-aggregation-common</name>
-    <description>Common Modules Parent POM</description>
-
-    <modules>
-        <module>news-aggregation-base</module>
-        <module>news-aggregation-cache</module>
-        <module>news-aggregation-datasource</module>
-        <module>news-aggregation-job</module>
-        <module>news-aggregation-storage</module>
-        <module>news-aggregation-es</module>
-    </modules>
-
+    <artifactId>news-aggregation-es</artifactId>
+    <name>es</name>
+    <description>es</description>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>21</java.version>
     </properties>
-
-
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -43,22 +26,46 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <scope>provided</scope>
         </dependency>
 
+
+        <!-- Base 模块 -->
         <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-base</artifactId>
         </dependency>
 
+        <!-- Elasticsearch Java Client -->
         <dependency>
-            <groupId>cn.hutool</groupId>
-            <artifactId>hutool-all</artifactId>
-            <version>5.8.22</version>
+            <groupId>co.elastic.clients</groupId>
+            <artifactId>elasticsearch-java</artifactId>
+            <version>8.11.0</version>
         </dependency>
+
+        <!-- Jackson for JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Jakarta JSON API -->
+        <dependency>
+            <groupId>jakarta.json</groupId>
+            <artifactId>jakarta.json-api</artifactId>
+            <version>2.1.1</version>
+        </dependency>
+
+        <!-- HTTP Client -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>4.5.14</version>
+        </dependency>
+
 
     </dependencies>
 

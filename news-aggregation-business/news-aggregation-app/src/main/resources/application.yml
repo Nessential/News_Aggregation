@@ -7,6 +7,7 @@ spring:
       - classpath:datasource.yml
       - classpath:xxl-job.yml
       - classpath:storage.yml
+      - classpath:elasticsearch.yml
       - classpath:news.yml
       - classpath:embedding.yml
       - classpath:vector.yml

@@ -1,0 +1,9 @@
+# Elasticsearch 配置
+# 引用 base.yml 中定义的变量
+
+elasticsearch:
+  host: ${news.aggregation.elasticsearch.host}
+  port: ${news.aggregation.elasticsearch.port}
+  username: ${news.aggregation.elasticsearch.username}
+  password: ${news.aggregation.elasticsearch.password}
+  index-name: ${news.aggregation.elasticsearch.index-name}
