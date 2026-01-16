@@ -1,0 +1,27 @@
+jetcache:
+  # ????????
+  statIntervalMinutes: 15
+
+  # ??????????
+  hidePackages: com.example
+
+  # ???????Caffeine?
+  local:
+    default:
+      type: caffeine
+      limit: 1000                      # ??????1000?
+      keyConvertor: fastjson2          # key???
+      expireAfterWriteInMillis: 300000 # ??5????
+
+  # ???????Redis?
+  remote:
+    default:
+      type: redisson
+      keyConvertor: fastjson2
+      valueEncoder: kryo               # ??????Kryo?????
+      valueDecoder: kryo
+      poolConfig:
+        minIdle: 5
+        maxIdle: 20
+        maxTotal: 50
+      keyPrefix: 'agent:'

@@ -5,6 +5,7 @@ spring:
     import:
       - classpath:base.yml
       - classpath:datasource.yml
+      - classpath:cache.yml
       - classpath:xxl-job.yml
       - classpath:storage.yml
       - classpath:elasticsearch.yml
