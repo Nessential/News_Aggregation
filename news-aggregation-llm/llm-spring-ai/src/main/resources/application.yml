@@ -1,0 +1,70 @@
+server:
+  port: 8081  # LLM服务独立端口
+
+spring:
+  application:
+    name: news-aggregation-llm-spring-ai
+  
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:your-api-key-here}
+      chat:
+        model: qwen-plus
+        temperature: 0.7
+        max-tokens: 4000
+      embedding:
+        model: text-embedding-v2
+
+    # Nacos MCP配置 (预留，MVP未使用)
+    nacos:
+      mcp:
+        server:
+          enabled: false
+          server-addr: ${NACOS_ADDR:localhost:8848}
+          namespace: news-agent
+          group-id: MCP_TOOLS
+          username: ${NACOS_USERNAME:nacos}
+          password: ${NACOS_PASSWORD:nacos}
+        client:
+          enabled: false
+          server-addr: ${NACOS_ADDR:localhost:8848}
+          namespace: news-agent
+
+# LLM应用配置
+app:
+  llm:
+    # Mock模式开关 (true=使用Mock数据, false=真实查询)
+    mock-mode: ${MOCK_MODE:false}
+    
+    # Qdrant向量数据库配置
+    qdrant:
+      collection-name: ${QDRANT_COLLECTION:news_vectors}
+    
+    # Elasticsearch配置
+    elasticsearch:
+      index-name: ${ES_INDEX:news_articles}
+    
+    # MCP工具配置
+    mcp:
+      local-tools-enabled: true
+      nacos-registry-enabled: true
+      auto-discover: true
+      # 工具特定配置
+      tool:
+        retrieval:
+          default-top-k: 10
+          max-top-k: 50
+          min-similarity: 0.5
+        rerank:
+          default-top-n: 5
+          max-top-n: 20
+          diversity-enabled: true
+          diversity-weight: 0.3
+
+# 日志配置
+logging:
+  level:
+    com.alibaba.cloud.ai: DEBUG
+    com.example.news.aggregation.llm.springai: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

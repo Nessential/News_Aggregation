@@ -57,3 +57,60 @@ news:
       username: ''
       password: ''
       index-name: news
+    # LLM统一配置
+    llm:
+      # 全局默认Provider
+      default-provider: zhipu
+      # 缓存配置
+      cache:
+        enabled: true
+        local-expire-seconds: 300
+        remote-expire-seconds: 3600
+      # 场景配置
+      scenes:
+        router:
+          provider: zhipu
+          model: glm-4-flash
+          temperature: 0.3
+          max-tokens: 500
+        generator:
+          provider: zhipu
+          model: glm-4
+          temperature: 0.7
+          max-tokens: 2048
+        planner:
+          provider: zhipu
+          model: glm-4
+          temperature: 0.5
+          max-tokens: 1024
+      # 智谱AI配置
+      zhipu:
+        enabled: true
+        api-key: ${ZHIPU_API_KEY}
+        base-url: https://open.bigmodel.cn/api/paas/v4
+        models:
+          chat: glm-4
+          chat-lite: glm-4-flash
+          embedding: embedding-3
+        temperature: 0.7
+        max-tokens: 2048
+        connect-timeout: 10000
+        read-timeout: 60000
+        cost:
+          chat-input: 0.0001
+          chat-output: 0.0001
+          embedding: 0.00005
+      # OpenAI配置（预留）
+      openai:
+        enabled: false
+        api-key: ${OPENAI_API_KEY:}
+        base-url: https://api.openai.com/v1
+        models:
+          chat: gpt-4
+          chat-lite: gpt-3.5-turbo
+      # 本地模型配置（预留）
+      local:
+        enabled: false
+        base-url: http://localhost:11434
+        models:
+          chat: llama2
