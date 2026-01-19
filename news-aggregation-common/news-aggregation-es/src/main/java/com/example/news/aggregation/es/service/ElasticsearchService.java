@@ -1,5 +1,6 @@
 package com.example.news.aggregation.es.service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,4 +29,14 @@ public interface ElasticsearchService {
      * @param documents 文档映射 (docId -> document)
      */
     void bulkIndex(String indexName, Map<String, Map<String, Object>> documents);
+    
+    /**
+     * 搜索文档
+     * @param indexName 索引名称
+     * @param query 查询字符串
+     * @param topK 返回结果数量
+     * @param fields 要搜索的字段列表
+     * @return 搜索结果列表，每个结果包含_id、_score和_source
+     */
+    List<Map<String, Object>> search(String indexName, String query, int topK, List<String> fields);
 }

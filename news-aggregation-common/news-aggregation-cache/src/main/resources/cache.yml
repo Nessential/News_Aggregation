@@ -1,24 +1,37 @@
+# Spring Redis配置（从 base.yml 引用）
+spring:
+  redis:
+    host: ${news.aggregation.redis.host}
+    port: ${news.aggregation.redis.port}
+    password: ${news.aggregation.redis.password}
+    database: 0
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 200
+        max-idle: 50
+        min-idle: 10
+        max-wait: -1ms
+
+# JetCache配置
 jetcache:
-  # ????????
   statIntervalMinutes: 15
-
-  # ??????????
   hidePackages: com.example
-
-  # ???????Caffeine?
+  
+  # 本地缓存（Caffeine）
   local:
     default:
       type: caffeine
-      limit: 1000                      # ??????1000?
-      keyConvertor: fastjson2          # key???
-      expireAfterWriteInMillis: 300000 # ??5????
-
-  # ???????Redis?
+      limit: 1000
+      keyConvertor: fastjson2
+      expireAfterWriteInMillis: 300000
+  
+  # 远程缓存（Redis）
   remote:
     default:
       type: redisson
       keyConvertor: fastjson2
-      valueEncoder: kryo               # ??????Kryo?????
+      valueEncoder: kryo
       valueDecoder: kryo
       poolConfig:
         minIdle: 5

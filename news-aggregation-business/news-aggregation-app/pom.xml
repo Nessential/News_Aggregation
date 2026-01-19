@@ -54,7 +54,12 @@
             <version>${project.version}</version>
         </dependency>
 
-
+        <!-- Agent 模块 (Phase 0集成模式) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- Spring Boot -->
         <dependency>
