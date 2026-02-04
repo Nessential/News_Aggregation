@@ -3,9 +3,9 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.example</groupId>
-        <artifactId>news-aggregation-common</artifactId>
+        <artifactId>News_Aggregation</artifactId>
         <version>0.0.1-SNAPSHOT</version>
-        <relativePath>../news-aggregation-common/pom.xml</relativePath>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>news-aggregation-embedding</artifactId>
@@ -34,6 +34,11 @@
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-job</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>
