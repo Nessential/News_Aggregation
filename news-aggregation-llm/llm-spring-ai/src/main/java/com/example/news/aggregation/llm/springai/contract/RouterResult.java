@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.util.Map;
 
 /**
  * Router结果契约
@@ -29,6 +30,8 @@ public class RouterResult {
     
     /** 澄清问题 */
     private String clarificationQuestion;
+    /** 鎻愬彇鐨勫弬鏁? (时间/分类/语言等) */
+    private Map<String, Object> params;
     
     /**
      * 创建默认QA结果（充底用）

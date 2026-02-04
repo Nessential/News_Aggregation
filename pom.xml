@@ -105,6 +105,30 @@
                 <version>${project.version}</version>
             </dependency>
 
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-news</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-vector</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-cache</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- Spring AI Alibaba BOM -->
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>

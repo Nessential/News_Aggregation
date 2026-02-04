@@ -20,4 +20,15 @@ public class AiConfig {
     public ChatClient.Builder chatClientBuilder(ChatModel chatModel) {
         return ChatClient.builder(chatModel);
     }
+    
+    /**
+     * 配置ChatClient Bean
+     * 用于Agent模块的Pipeline调用
+     */
+    @Bean
+    public ChatClient chatClient(ChatClient.Builder builder) {
+        return builder
+                .defaultSystem("You are a helpful AI assistant for news aggregation and analysis.")
+                .build();
+    }
 }

@@ -4,7 +4,6 @@ server:
 spring:
   application:
     name: news-aggregation-llm-spring-ai
-  
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:your-api-key-here}

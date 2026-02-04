@@ -1,52 +1,112 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-	<modelVersion>4.0.0</modelVersion>
-	<parent>
-		<groupId>com.example</groupId>
-		<artifactId>News_Aggregation</artifactId>
-		<version>0.0.1-SNAPSHOT</version>
-		<relativePath/> <!-- lookup parent from repository -->
-	</parent>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
 
-	<artifactId>news-aggregation-agent</artifactId>
+    <parent>
+        <groupId>com.example</groupId>
+        <artifactId>News_Aggregation</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
 
-	<name>news-aggregation-agent</name>
-	<description>news-aggregation-agent</description>
-	<dependencies>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot</artifactId>
-		</dependency>
+    <artifactId>news-aggregation-agent</artifactId>
+    <name>news-aggregation-agent</name>
+    <description>Agent Module - Business Orchestration Layer</description>
+    
+    <dependencies>
+        <!-- LLM Module (for Router, Generator, EmbeddingModel) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>llm-spring-ai</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-autoconfigure</artifactId>
-		</dependency>
-	</dependencies>
+        <!-- Vector Module (for VectorStoreService) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-vector</artifactId>
+        </dependency>
 
+        <!-- ES Module (for ElasticsearchService) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-es</artifactId>
+        </dependency>
 
-	<packaging>pom</packaging>
+        <!-- Base Module (for base utilities) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-base</artifactId>
+        </dependency>
 
-	<modules>
-		<module>news-aggregation-core</module>
-	</modules>
+        <!-- Cache Module (for Redis) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-cache</artifactId>
+        </dependency>
 
-	<properties>
-		<application.name>news-aggregation-business</application.name>
-		<maven.compiler.source>21</maven.compiler.source>
-		<maven.compiler.target>21</maven.compiler.target>
-		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-	</properties>
+        <!-- Embedding Module (for Zhipu Embedding) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-embedding</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
+        <!-- Spring Boot Starter -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
 
-	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
-		</plugins>
-	</build>
+        <!-- Spring Boot Web -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
 
+        <!-- Spring Data Redis -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- CGLIB for Spring Proxies -->
+        <dependency>
+            <groupId>cglib</groupId>
+            <artifactId>cglib</artifactId>
+            <version>3.3.0</version>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.example.news.aggregation.agent.AgentApplication</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
