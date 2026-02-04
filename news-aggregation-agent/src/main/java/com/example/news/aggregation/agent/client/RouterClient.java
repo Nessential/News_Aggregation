@@ -1,0 +1,48 @@
+package com.example.news.aggregation.agent.client;
+
+import com.example.news.aggregation.llm.springai.contract.RouteRequest;
+import com.example.news.aggregation.llm.springai.contract.RouterResult;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * LLM Router 客户端（HTTP）
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class RouterClient {
+
+    private final RestTemplate restTemplate;
+
+    @Value("${app.llm.router.base-url:http://localhost:8081}")
+    private String routerBaseUrl;
+
+    /**
+     * 调用 LLM Router 路由接口
+     */
+    public RouterResult route(String sessionId, String query, List<String> history, Map<String, Object> constraints) {
+        String url = routerBaseUrl + "/api/router/route";
+        RouteRequest request = RouteRequest.builder()
+                .sessionId(sessionId)
+                .query(query)
+                .history(history)
+                .constraints(constraints)
+                .build();
+        try {
+            ResponseEntity<RouterResult> response = restTemplate.postForEntity(
+                    url, request, RouterResult.class);
+            return response.getBody();
+        } catch (Exception e) {
+            log.warn("RouterClient route failed, fallback to default rule. error={}", e.getMessage());
+            return null;
+        }
+    }
+}
