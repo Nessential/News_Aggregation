@@ -1,0 +1,109 @@
+server:
+  port: 8084
+
+  
+  # Redis配置 (用于Session管理)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+# Spring AI配置
+spring:
+  application:
+    name: news-aggregation-agent
+  config:
+    import:
+      - classpath:base.yml  # 导入基础配置，包含智谱AI配置
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:mock-key}
+      # chat模型配置  
+      chat:
+        model: qwen-plus
+        temperature: 0.7
+
+# 智谱 Embedding 配置 (使用 2048 维向量)
+embedding:
+  zhipu:
+    api-key: ${ZHIPU_API_KEY}
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    model: embedding-3
+    dimensions: 2048
+    connect-timeout: 10000
+    read-timeout: 30000
+    chunk-size: 500
+    chunk-overlap: 50
+    min-chunk-size: 100
+
+# XXL-Job 配置 (占位符，Agent 不使用)
+xxl:
+  job:
+    admin:
+      addresses: ${news.aggregation.xxl-job.admin-addresses}
+    access-token: ${news.aggregation.xxl-job.access-token}
+    executor:
+      appname: ${news.aggregation.xxl-job.executor-appname}
+      port: ${news.aggregation.xxl-job.executor-port}
+      ip: ${news.aggregation.xxl-job.executor-ip}
+      logpath: logs/xxl-job
+      logretentiondays: 30
+
+# Agent应用配置
+app:
+  # Mock模式开关（开发/测试时启用）
+  llm:
+    mock-mode: false  # 设为false使用真实数据源
+  
+  # Qdrant配置
+  qdrant:
+    # 从 base.yml 中读取英文 Chunk 集合名
+    collection-name: ${news.aggregation.qdrant.collections.chunks-en}
+    host: ${news.aggregation.qdrant.host}
+    port: ${news.aggregation.qdrant.port}
+  
+  # Elasticsearch配置
+  elasticsearch:
+    # 从 base.yml 中读取索引名
+    index-name: ${news.aggregation.elasticsearch.index-name}
+  
+  agent:
+    # 会话管理
+    session:
+      timeout-minutes: 30
+      max-history-size: 50
+      redis-key-prefix: "session:"
+    
+    # Pipeline配置
+    pipeline:
+      default-top-k: 10
+      max-candidates: 50
+      timeout-seconds: 30
+    
+    # 重试策略
+    retry:
+      max-attempts: 3
+      backoff-ms: 1000
+    
+    # 降级策略
+    fallback:
+      enabled: true
+      default-message: "抱歉，当前无法处理您的请求，请稍后再试"
+
+# 日志配置
+logging:
+  level:
+    com.example.news.aggregation.agent: DEBUG
+    com.example.news.aggregation.llm: DEBUG
+    com.example.news.aggregation.news: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
