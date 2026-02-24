@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * LLM 生成响应
+ * LLM生成响应
  */
 @Data
 @Builder
@@ -17,6 +17,6 @@ public class GenerateResponse {
     /** 生成内容 */
     private String content;
 
-    /** 令牌使用量（可选） */
+    /** Token使用量（可选） */
     private Integer usageTokens;
 }

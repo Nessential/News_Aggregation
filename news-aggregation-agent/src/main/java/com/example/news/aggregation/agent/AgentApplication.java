@@ -22,8 +22,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
     "com.example.news.aggregation.embedding",
     "com.example.news.aggregation.cache",
     "com.example.news.aggregation.base",
-    "com.example.news.aggregation.llm"
-    // 不扫描 job 包，避免加载 XxlJobConfig
+        // 不扫描 job 包，避免加载 XxlJobConfig
 })
 public class AgentApplication {
     

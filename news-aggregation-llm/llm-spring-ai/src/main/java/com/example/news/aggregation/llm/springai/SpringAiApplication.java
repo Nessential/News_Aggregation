@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * Spring AI LLM Application
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.example.news.aggregation")
 public class SpringAiApplication {
     
     public static void main(String[] args) {

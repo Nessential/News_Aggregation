@@ -1,7 +1,11 @@
 package com.example.news.aggregation.es.service.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.*;
+import co.elastic.clients.json.JsonData;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -110,23 +114,35 @@ public class ElasticsearchServiceImpl implements ElasticsearchService {
 
     @Override
     public List<Map<String, Object>> search(String indexName, String query, int topK, List<String> fields) {
+        return search(indexName, query, topK, fields, null, null);
+    }
+
+    @Override
+    public List<Map<String, Object>> search(String indexName,
+                                            String query,
+                                            int topK,
+                                            List<String> fields,
+                                            Map<String, Object> filters,
+                                            String sortBy) {
         if (query == null || query.trim().isEmpty()) {
-            log.warn("ES 搜索查询为空: index={}", indexName);
-            return new ArrayList<>();
+            query = "";
         }
         
         try {
-            /* 构建multi_match查询 */
-            SearchRequest searchRequest = SearchRequest.of(s -> s
-                .index(indexName)
-                .size(topK)
-                .query(q -> q
-                    .multiMatch(m -> m
-                        .query(query)
-                        .fields(fields)
-                    )
-                )
-            );
+            Query finalQuery = buildQuery(query, fields, filters);
+
+            SearchRequest.Builder requestBuilder = new SearchRequest.Builder()
+                    .index(indexName)
+                    .size(topK)
+                    .query(finalQuery);
+
+            if ("time".equalsIgnoreCase(sortBy)) {
+                requestBuilder.sort(s -> s.field(f -> f
+                        .field("publication_time")
+                        .order(SortOrder.Desc)));
+            }
+
+            SearchRequest searchRequest = requestBuilder.build();
             
             // 执行搜索
             SearchResponse<Map> response = esClient.search(searchRequest, Map.class);
@@ -150,5 +166,51 @@ public class ElasticsearchServiceImpl implements ElasticsearchService {
             // 优雅降级：返回空列表而不是抛出异常
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * 构建ES查询（支持过滤条件）
+     */
+    private Query buildQuery(String query, List<String> fields, Map<String, Object> filters) {
+        BoolQuery.Builder boolBuilder = new BoolQuery.Builder();
+
+        if (query != null && !query.trim().isEmpty()) {
+            boolBuilder.must(m -> m.multiMatch(mm -> mm
+                    .query(query)
+                    .fields(fields)
+            ));
+        } else {
+            boolBuilder.must(m -> m.matchAll(ma -> ma));
+        }
+
+        if (filters != null && !filters.isEmpty()) {
+            for (Map.Entry<String, Object> entry : filters.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                if (key == null || value == null) {
+                    continue;
+                }
+                if (value instanceof Map<?, ?> rangeMap) {
+                    Object gte = rangeMap.get("gte");
+                    Object lte = rangeMap.get("lte");
+                    boolBuilder.filter(f -> f.range(r -> {
+                        r.field(key);
+                        if (gte != null) {
+                            r.gte(JsonData.of(gte));
+                        }
+                        if (lte != null) {
+                            r.lte(JsonData.of(lte));
+                        }
+                        return r;
+                    }));
+                } else {
+                    boolBuilder.filter(f -> f.term(t -> t
+                            .field(key)
+                            .value(String.valueOf(value))));
+                }
+            }
+        }
+
+        return new Query.Builder().bool(boolBuilder.build()).build();
     }
 }

@@ -1,7 +1,8 @@
 server:
   port: 8084
 
-  
+
+
   # Redis配置 (用于Session管理)
   data:
     redis:
@@ -60,10 +61,17 @@ xxl:
 
 # Agent应用配置
 app:
+  news:
+    retrieval:
+      base-url: http://localhost:8080
+    base-url: http://localhost:8080
+
   # Mock模式开关（开发/测试时启用）
   llm:
     mock-mode: false  # 设为false使用真实数据源
-  
+    base-url: http://localhost:8081
+    router:
+      base-url: http://localhost:8081
   # Qdrant配置
   qdrant:
     # 从 base.yml 中读取英文 Chunk 集合名
