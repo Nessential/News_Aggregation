@@ -3,7 +3,7 @@ news:
   aggregation:
     # MySQL配置
     mysql:
-      url: jdbc:mysql://192.168.1.10:3306/news-aggregation
+      url: jdbc:mysql://127.0.0.1:3306/news-aggregation
       username: root
       password: wangchuan
     # Redis配置
@@ -17,13 +17,13 @@ news:
       access-token: default_token
       executor-appname: news-aggregation-executor
       executor-port: 9999
-      executor-ip: 192.168.1.10
+      executor-ip: 127.0.0.1
       admin-timeout: 3
     # MinIO配置
     minio:
-      endpoint: http://192.168.1.10:9000
+      endpoint: http://127.0.0.1:9000
       access-key: admin
-      secret-key: 12345678
+      secret-key: Minio@123456
       bucket: news-image
     # 百度翻译配置
     translate:

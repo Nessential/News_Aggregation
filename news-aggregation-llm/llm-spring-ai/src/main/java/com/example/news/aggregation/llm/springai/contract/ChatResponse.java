@@ -15,22 +15,22 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChatResponse {
-    
-    /** 会话 ID */
+
+    /** 会话ID */
     private String sessionId;
-    
-    /** LLM 生成的答案 */
+
+    /** LLM生成的答案 */
     private String answer;
-    
-    /** 任务类型 (QA/SUMMARY/COMPARE等) */
+
+    /** 任务类型（QA/SUMMARY/COMPARE 等） */
     private String taskFamily;
-    
+
     /** 引用来源列表 */
     private List<Source> sources;
-    
+
     /** 时间戳 */
     private Long timestamp;
-    
+
     /**
      * 引用来源
      */
@@ -39,15 +39,15 @@ public class ChatResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Source {
-        /** 文档 ID */
+        /** 文档ID */
         private String id;
-        
+
         /** 标题 */
         private String title;
-        
+
         /** 原文链接 */
         private String url;
-        
+
         /** 相关度分数 */
         private Double relevance;
     }

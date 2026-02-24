@@ -14,6 +14,7 @@ import io.qdrant.client.grpc.Points.Condition;
 import io.qdrant.client.grpc.Points.FieldCondition;
 import io.qdrant.client.grpc.Points.Filter;
 import io.qdrant.client.grpc.Points.Match;
+import io.qdrant.client.grpc.Points.Range;
 import io.qdrant.client.grpc.Points.PointStruct;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import io.qdrant.client.grpc.Points.SearchPoints;
@@ -226,25 +227,51 @@ public class QdrantVectorStoreServiceImpl implements VectorStoreService {
         for (Map.Entry<String, Object> entry : filter.entrySet()) {
             String key = entry.getKey();
             Object val = entry.getValue();
+            if (key == null || val == null) {
+                continue;
+            }
 
-            Match.Builder matchBuilder = Match.newBuilder();
-            if (val instanceof String) {
-                matchBuilder.setKeyword((String) val);
-            } else if (val instanceof Integer) {
-                matchBuilder.setInteger((Integer) val);
-            } else if (val instanceof Long) {
-                matchBuilder.setInteger((Long) val);
-            } else if (val instanceof Boolean) {
-                matchBuilder.setBoolean((Boolean) val);
+            FieldCondition.Builder fieldBuilder = FieldCondition.newBuilder()
+                    .setKey(key);
+
+            // 支持范围过滤（如 published_at）
+            if (val instanceof Map<?, ?> rangeMap) {
+                Range.Builder rangeBuilder = Range.newBuilder();
+                Object gte = rangeMap.get("gte");
+                Object lte = rangeMap.get("lte");
+                Object gt = rangeMap.get("gt");
+                Object lt = rangeMap.get("lt");
+                if (gte instanceof Number n) {
+                    rangeBuilder.setGte(n.doubleValue());
+                }
+                if (lte instanceof Number n) {
+                    rangeBuilder.setLte(n.doubleValue());
+                }
+                if (gt instanceof Number n) {
+                    rangeBuilder.setGt(n.doubleValue());
+                }
+                if (lt instanceof Number n) {
+                    rangeBuilder.setLt(n.doubleValue());
+                }
+                fieldBuilder.setRange(rangeBuilder.build());
             } else {
-                matchBuilder.setKeyword(String.valueOf(val));
+                Match.Builder matchBuilder = Match.newBuilder();
+                if (val instanceof String) {
+                    matchBuilder.setKeyword((String) val);
+                } else if (val instanceof Integer) {
+                    matchBuilder.setInteger((Integer) val);
+                } else if (val instanceof Long) {
+                    matchBuilder.setInteger((Long) val);
+                } else if (val instanceof Boolean) {
+                    matchBuilder.setBoolean((Boolean) val);
+                } else {
+                    matchBuilder.setKeyword(String.valueOf(val));
+                }
+                fieldBuilder.setMatch(matchBuilder.build());
             }
 
             Condition condition = Condition.newBuilder()
-                    .setField(FieldCondition.newBuilder()
-                            .setKey(key)
-                            .setMatch(matchBuilder.build())
-                            .build())
+                    .setField(fieldBuilder.build())
                     .build();
 
             filterBuilder.addMust(condition);

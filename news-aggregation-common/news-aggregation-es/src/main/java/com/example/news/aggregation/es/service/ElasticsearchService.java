@@ -39,4 +39,21 @@ public interface ElasticsearchService {
      * @return 搜索结果列表，每个结果包含_id、_score和_source
      */
     List<Map<String, Object>> search(String indexName, String query, int topK, List<String> fields);
+
+    /**
+     * 搜索文档（带过滤与排序）
+     * @param indexName 索引名称
+     * @param query 查询字符串
+     * @param topK 返回结果数量
+     * @param fields 要搜索的字段列表
+     * @param filters 过滤条件（可选）
+     * @param sortBy 排序规则（time/relevance）
+     * @return 搜索结果列表，每个结果包含_id、_score和_source
+     */
+    List<Map<String, Object>> search(String indexName,
+                                     String query,
+                                     int topK,
+                                     List<String> fields,
+                                     Map<String, Object> filters,
+                                     String sortBy);
 }

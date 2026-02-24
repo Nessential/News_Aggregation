@@ -13,9 +13,14 @@ import org.springframework.stereotype.Component;
 public class StorageProperties {
 
     /**
+     * 是否启用 MinIO 存储
+     */
+    private boolean enabled = true;
+
+    /**
      * MinIO 服务地址
      */
-    private String endpoint = "http://192.168.1.10:9002";
+    private String endpoint = "http://127.0.0.1:9002";
 
     /**
      * 访问密钥

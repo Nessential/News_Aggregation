@@ -1,6 +1,8 @@
 package com.example.news.aggregation.llm.springai.validator;
 
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
+import com.example.news.aggregation.llm.springai.contract.Plan;
+import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -9,17 +11,17 @@ import java.util.List;
 
 /**
  * 输出校验器
- * 验证LLM生成的答案质量
+ * 校验LLM生成的答案质量
  */
 @Slf4j
 @Component
 public class OutputValidator {
 
     /**
-     * 验证生成的答案
+     * 校验生成的答案
      *
      * @param draft 生成草稿
-     * @return 验证是否通过
+     * @return 校验是否通过
      */
     public boolean validate(GeneratorDraft draft) {
         if (draft == null) {
@@ -34,7 +36,7 @@ public class OutputValidator {
             errors.add("Answer is empty");
         }
 
-        // 2. 检查答案长度（太短或太长）
+        // 2. 检查答案长度（过短或过长）
         if (draft.getAnswer() != null) {
             int length = draft.getAnswer().length();
             if (length < 10) {
@@ -44,12 +46,12 @@ public class OutputValidator {
             }
         }
 
-        // 3. 检查质量分数
+        // 3. 检查质量评分
         if (draft.getQualityScore() == null || draft.getQualityScore() < 0.3) {
             errors.add("Quality score too low: " + draft.getQualityScore());
         }
 
-        // 4. 检查是否包含引用（如果有citations字段）
+        // 4. 检查是否包含引用（可选）
         if (draft.getCitations() == null || draft.getCitations().isEmpty()) {
             log.debug("No citations provided (may be acceptable for some queries)");
         }
@@ -69,9 +71,49 @@ public class OutputValidator {
     }
 
     /**
+     * 校验Router结果
+     *
+     * @param result Router结果
+     * @return 是否通过
+     */
+    public boolean validateRouter(RouterResult result) {
+        if (result == null) {
+            log.warn("RouterResult is null");
+            return false;
+        }
+        if (result.getTaskFamily() == null || result.getTaskFamily().isBlank()) {
+            log.warn("RouterResult.taskFamily is empty");
+            return false;
+        }
+        if (result.getRetrievalMode() == null || result.getRetrievalMode().isBlank()) {
+            log.warn("RouterResult.retrievalMode is empty");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 校验Plan结果
+     *
+     * @param plan 计划
+     * @return 是否通过
+     */
+    public boolean validatePlan(Plan plan) {
+        if (plan == null) {
+            log.warn("Plan is null");
+            return false;
+        }
+        if (plan.getTasks() == null || plan.getTasks().isEmpty()) {
+            log.warn("Plan tasks is empty");
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * 检查是否包含危险内容
-     * MVP实现: 简单关键词匹配
-     * 生产环境: 应使用专业的内容安全API
+     * MVP实现：简单关键词匹配
+     * 生产环境：应使用专业的内容安全API
      */
     private boolean containsDangerousContent(String text) {
         if (text == null) {
@@ -79,7 +121,7 @@ public class OutputValidator {
         }
 
         String lowerText = text.toLowerCase();
-        
+
         // 简单的危险关键词列表（示例）
         String[] dangerousKeywords = {
             "暴力",
@@ -100,28 +142,28 @@ public class OutputValidator {
     }
 
     /**
-     * 验证答案并返回详细信息
+     * 校验答案并返回详细信息
      *
      * @param draft 生成草稿
-     * @return 验证结果（包含错误信息）
+     * @return 校验结果（包含错误信息）
      */
     public ValidationResult validateWithDetails(GeneratorDraft draft) {
         boolean isValid = validate(draft);
-        
+
         ValidationResult result = new ValidationResult();
         result.setValid(isValid);
-        
+
         if (!isValid) {
             result.setMessage("Validation failed");
         } else {
             result.setMessage("Validation passed");
         }
-        
+
         return result;
     }
 
     /**
-     * 验证结果类
+     * 校验结果类
      */
     public static class ValidationResult {
         private boolean valid;

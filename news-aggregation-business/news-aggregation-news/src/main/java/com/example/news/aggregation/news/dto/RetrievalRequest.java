@@ -16,4 +16,6 @@ public class RetrievalRequest {
     private Integer topK;
     // 向量检索最小得分阈值（可选）
     private Double minScore;
+    // 过滤条件（可选）
+    private java.util.Map<String, Object> filters;
 }

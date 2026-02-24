@@ -9,18 +9,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Router 请求
+ * Router请求参数
+ * 用于路由识别与参数抽取
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class RouteRequest {
+public class RouterRequest {
 
-    /** 会话 ID */
+    /** 会话ID */
     private String sessionId;
 
-    /** 用户查询 */
+    /** 用户查询文本 */
     private String query;
 
     /** 对话历史（可选） */

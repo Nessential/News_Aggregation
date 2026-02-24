@@ -21,7 +21,7 @@ public class RetrievalController {
     @PostMapping("/keyword")
     public ResponseEntity<RetrievalResponse> keyword(@RequestBody RetrievalRequest request) {
         List<RetrievalResultDto> results = retrievalService.keywordSearch(
-                request.getQuery(), request.getTopK());
+                request.getQuery(), request.getTopK(), request.getFilters());
         return ResponseEntity.ok(RetrievalResponse.builder().results(results).build());
     }
 
@@ -29,7 +29,7 @@ public class RetrievalController {
     @PostMapping("/vector")
     public ResponseEntity<RetrievalResponse> vector(@RequestBody RetrievalRequest request) {
         List<RetrievalResultDto> results = retrievalService.vectorSearch(
-                request.getQuery(), request.getTopK(), request.getMinScore());
+                request.getQuery(), request.getTopK(), request.getMinScore(), request.getFilters());
         return ResponseEntity.ok(RetrievalResponse.builder().results(results).build());
     }
 
@@ -37,7 +37,7 @@ public class RetrievalController {
     @PostMapping("/hybrid")
     public ResponseEntity<RetrievalResponse> hybrid(@RequestBody RetrievalRequest request) {
         List<RetrievalResultDto> results = retrievalService.hybridSearch(
-                request.getQuery(), request.getTopK(), request.getMinScore());
+                request.getQuery(), request.getTopK(), request.getMinScore(), request.getFilters());
         return ResponseEntity.ok(RetrievalResponse.builder().results(results).build());
     }
 

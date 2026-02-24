@@ -1,6 +1,6 @@
 package com.example.news.aggregation.agent.client;
 
-import com.example.news.aggregation.llm.springai.contract.RouteRequest;
+import com.example.news.aggregation.llm.springai.contract.RouterRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +30,7 @@ public class RouterClient {
      */
     public RouterResult route(String sessionId, String query, List<String> history, Map<String, Object> constraints) {
         String url = routerBaseUrl + "/api/router/route";
-        RouteRequest request = RouteRequest.builder()
+        RouterRequest request = RouterRequest.builder()
                 .sessionId(sessionId)
                 .query(query)
                 .history(history)

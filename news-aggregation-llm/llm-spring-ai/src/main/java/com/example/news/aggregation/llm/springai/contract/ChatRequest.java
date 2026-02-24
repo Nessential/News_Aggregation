@@ -13,13 +13,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChatRequest {
-    
-    /** 会话 ID */
+
+    /** 会话ID */
     private String sessionId;
-    
+
     /** 用户消息 */
     private String message;
-    
-    /** 用户 ID */
+
+    /** 用户ID */
     private String userId;
 }

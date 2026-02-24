@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * LLM 生成请求
+ * LLM生成请求
  */
 @Data
 @Builder
