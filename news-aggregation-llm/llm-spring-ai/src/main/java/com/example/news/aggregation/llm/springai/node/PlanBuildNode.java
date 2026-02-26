@@ -112,6 +112,7 @@ public class PlanBuildNode {
         Map<String, List<String>> adjacency = new HashMap<>();
 
         // 初始化
+
         for (String node : dependencies.keySet()) {
             indegree.put(node, 0);
             adjacency.putIfAbsent(node, new ArrayList<>());
@@ -150,6 +151,7 @@ public class PlanBuildNode {
         }
 
         // 若存在环，则返回原始顺序兜底
+
         if (order.size() != indegree.size()) {
             log.warn("Topological sort detected cycle, fallback to original order.");
             return new ArrayList<>(dependencies.keySet());

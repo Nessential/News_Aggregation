@@ -36,6 +36,7 @@ public class ChatController {
                 request.getSessionId(), request.getUserId());
         
         // 输入验证
+        
         if (request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("Message cannot be empty");
         }

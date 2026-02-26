@@ -13,8 +13,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.List;
 
 /**
- * Generator 客户端（HTTP）。
- */
+ * Generator 瀹㈡埛绔紙HTTP锛夈€? */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -26,10 +25,9 @@ public class GeneratorClient {
     private String llmBaseUrl;
 
     /**
-     * 调用 GeneratorGraph。
-     */
+     * 璋冪敤 GeneratorGraph銆?     */
     public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
-        // TODO 改为 RPC 调用
+        // TODO 鏀逛负 RPC 璋冪敤
         String url = llmBaseUrl + "/api/graph/generate";
         GeneratorRequest request = GeneratorRequest.builder()
                 .query(query)
@@ -39,12 +37,12 @@ public class GeneratorClient {
                 .build();
         try {
             int evidenceCount = evidence != null ? evidence.size() : 0;
-            log.info("调用生成服务FLOW|agent|client=generator|step=start|url={}|taskFamily={}|evidenceCount={}|next=LLM-Generator",
+            log.info("[client] 璋冪敤鐢熸垚鏈嶅姟FLOW|agent|client=generator|step=start|url={}|taskFamily={}|evidenceCount={}|next=LLM-Generator",
                     url, taskFamily, evidenceCount);
             ResponseEntity<GeneratorDraft> response = restTemplate.postForEntity(url, request, GeneratorDraft.class);
             GeneratorDraft body = response.getBody();
             int answerLength = body != null && body.getAnswer() != null ? body.getAnswer().length() : 0;
-            log.info("生成返回FLOW|agent|client=generator|step=end|answerLength={}|next=响应组装", answerLength);
+            log.info("[client] 鐢熸垚杩斿洖FLOW|agent|client=generator|step=end|answerLength={}|next=鍝嶅簲缁勮", answerLength);
             return body;
         } catch (Exception e) {
             log.warn("GeneratorClient generate failed, error={}", e.getMessage());
@@ -56,3 +54,4 @@ public class GeneratorClient {
         return generate(query, taskFamily, evidence, null);
     }
 }
+

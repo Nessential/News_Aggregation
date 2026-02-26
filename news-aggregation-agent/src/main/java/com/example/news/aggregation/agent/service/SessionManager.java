@@ -97,6 +97,7 @@ public class SessionManager {
         sessionState.addHistory(message);
 
         // 限制历史记录大小
+
         if (sessionState.getHistory().size() > maxHistorySize) {
             sessionState.setHistory(
                     sessionState.getHistory().subList(
@@ -152,7 +153,7 @@ public class SessionManager {
         sessionState.setConversationState(newState);
         sessionState.setUpdatedAt(LocalDateTime.now());
         saveSession(sessionState);
-        log.info("Session {} state transition: {} -> {}", sessionId, oldState, newState);
+        log.info("[fsm] Session {} state transition: {} -> {}", sessionId, oldState, newState);
     }
 
     /**

@@ -32,7 +32,7 @@ public class SearchNewsExecutor implements CapabilityExecutor {
         return CapabilityMetadata.builder()
                 .name("search_news")
                 .version("v1")
-                .description("关键词检索新闻内容")
+                .description("关键词检索")
                 .timeoutMs(3000L)
                 .costLevel("LOW")
                 .permissionScope("PUBLIC")
@@ -50,11 +50,10 @@ public class SearchNewsExecutor implements CapabilityExecutor {
 
         Map<String, Object> filters = extractFilters(parameters, context);
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("开始关键词检索FLOW|agent|node=search_news|step=start|sessionId={}|topK={}|query={}|reason=任务规划/默认检索|next=检索服务",
-                sessionId, topK, query);
+        log.info("[链路最终] 开始关键词检索FLOW|agent|node=search_news|step=start|sessionId={}|topK={}|query={}|reason=任务规划/默认检索|next=检索服务", sessionId, topK, truncate(query, 200));
         List<RetrievalResult> results = retrievalClient.keywordSearch(query, topK, filters);
         context.addEvidence(results);
-        log.info("关键词检索完成FLOW|agent|node=search_news|step=end|sessionId={}|resultCount={}|next=证据汇总/后续节点",
+        log.info("[链路最终] 关键词检索完成FLOW|agent|node=search_news|step=end|sessionId={}|resultCount={}|next=证据汇总/后续节点",
                 sessionId, results.size());
         return results;
     }
@@ -111,5 +110,12 @@ public class SearchNewsExecutor implements CapabilityExecutor {
             return filters.isEmpty() ? null : filters;
         }
         return null;
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null || maxLength <= 0) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }

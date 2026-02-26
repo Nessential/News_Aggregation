@@ -60,6 +60,7 @@ public class GeneratorGraph {
             graph.addEdge("citation_extract", "quality_check");
 
             // 质量不达标时回到生成节点，达标则结束
+
             graph.addConditionalEdges("quality_check",
                     state -> CompletableFuture.completedFuture(
                             shouldRetry(readState(state)) ? "retry" : "done"

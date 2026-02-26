@@ -1,7 +1,7 @@
 package com.example.news.aggregation.llm.springai.node;
 
-import com.example.news.aggregation.llm.springai.state.RouterState;
 import com.example.news.aggregation.llm.springai.prompt.PromptRegistry;
+import com.example.news.aggregation.llm.springai.state.RouterState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * 指代消解节点。
- * 将“它/这件事/最近”等上下文指代转换为明确表达。
+ * 将“它/这件事/最近”等上下文指代转化为明确表达。
  */
 @Slf4j
 @Component
@@ -36,7 +36,7 @@ public class ReferenceResolveNode {
         List<String> history = state.getHistory();
         String sessionId = state.getSessionId() != null ? state.getSessionId() : "unknown";
         // 流程日志：进入指代消解
-        log.info("进入指代消解FLOW|router|node=reference_resolve|step=start|sessionId={}|query={}|next=slot_extract_or_completeness_check",
+        log.info("[链路最终] 进入指代消解FLOW|router|node=reference_resolve|step=start|sessionId={}|query={}|next=slot_extract_or_completeness_check",
                 sessionId, truncate(query, 200));
 
         if (query == null || query.isBlank()) {
@@ -72,7 +72,7 @@ public class ReferenceResolveNode {
             String finalResolved = (resolved == null || resolved.isBlank()) ? query : resolved.trim();
             state.setResolvedQuery(finalResolved);
             log.info("指代消解-模型原始输出(截断)={}", truncate(resolved, 200));
-            log.info("指代消解完成FLOW|router|node=reference_resolve|decision=resolved|sessionId={}|resolvedQuery={}|next=slot_extract_or_completeness_check",
+            log.info("[链路最终] 指代消解完成FLOW|router|node=reference_resolve|decision=resolved|sessionId={}|resolvedQuery={}|next=slot_extract_or_completeness_check",
                     sessionId, truncate(finalResolved, 200));
         } catch (Exception e) {
             log.warn("ReferenceResolveNode failed, fallback to original query. error={}", e.getMessage());

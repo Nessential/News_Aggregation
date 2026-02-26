@@ -1,11 +1,15 @@
 package com.example.news.aggregation.llm.springai.node;
 
+import com.example.news.aggregation.llm.springai.prompt.PromptRegistry;
 import com.example.news.aggregation.llm.springai.state.RouterState;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -14,7 +18,15 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class SlotExtractionNode {
+
+    /** ChatClient 构建器 */
+    private final ChatClient.Builder chatClientBuilder;
+    /** 提示词仓库 */
+    private final PromptRegistry promptRegistry;
+    /** JSON 解析器 */
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 执行槽位提取。
@@ -28,7 +40,7 @@ public class SlotExtractionNode {
         String query = state.getResolvedQuery() != null ? state.getResolvedQuery() : state.getQuery();
         String sessionId = state.getSessionId() != null ? state.getSessionId() : "unknown";
         // 流程日志：进入槽位提取
-        log.info("进入槽位提取FLOW|router|node=slot_extract|step=start|sessionId={}|query={}|next=completeness_check",
+        log.info("[链路最终] 进入槽位提取FLOW|router|node=slot_extract|step=start|sessionId={}|query={}|next=completeness_check",
                 sessionId, truncate(query, 200));
 
         if (query == null) {
@@ -39,26 +51,36 @@ public class SlotExtractionNode {
 
         Map<String, Object> params = state.getParams() != null ? new HashMap<>(state.getParams()) : new HashMap<>();
 
-        // TODO 简化的时间范围识别
-        String lower = query.toLowerCase(Locale.ROOT);
-        if (lower.contains("最近7天") || lower.contains("近7天") || lower.contains("7天内") || lower.contains("一周")) {
-            params.put("time_range", "7d");
-        } else if (lower.contains("最近30天") || lower.contains("近30天") || lower.contains("30天内") || lower.contains("一个月")) {
-            params.put("time_range", "30d");
-        } else if (lower.contains("最近三个月") || lower.contains("近三个月") || lower.contains("3个月")) {
-            params.put("time_range", "90d");
+        try {
+            ChatClient client = chatClientBuilder.build();
+            String template = promptRegistry.getPrompt("intent-news", "");
+            if (template == null || template.isBlank()) {
+                log.warn("槽位提取缺少提示词模板: intent-news");
+                applyDefaultTaskParams(state, params, "missing_prompt");
+                return state;
+            }
+            String prompt = renderTemplate(template, query);
+            String response = client.prompt()
+                    .user(prompt)
+                    .call()
+                    .content();
+            log.info("槽位提取-模型原始输出(截断)={}", truncate(response, 200));
+
+            boolean applied = applyL2Result(response, state, params);
+            if (!applied) {
+                applyDefaultTaskParams(state, params, "invalid_json");
+            }
+        } catch (Exception e) {
+            log.warn("SlotExtractionNode failed, fallback to default. error={}", e.getMessage());
+            applyDefaultTaskParams(state, params, "exception");
         }
 
-        // TODO 简化语言识别
-        if (lower.contains("英文") || lower.contains("英语") || lower.contains("english")) {
-            params.put("language", "en");
-        } else if (lower.contains("中文") || lower.contains("chinese")) {
-            params.put("language", "zh");
-        }
-
-        state.setParams(params);
-        log.info("槽位提取完成FLOW|router|node=slot_extract|decision=extracted|sessionId={}|params={}|next=completeness_check",
-                sessionId, params);
+        log.info("二级意图识别结果|taskFamily={}|confidence={}|reason={}",
+                state.getTaskFamily(),
+                state.getTaskConfidence(),
+                state.getTaskReason());
+        log.info("[链路最终] 槽位提取完成FLOW|router|node=slot_extract|decision=extracted|sessionId={}|taskFamily={}|params={}|next=completeness_check",
+                sessionId, state.getTaskFamily(), state.getParams());
         return state;
     }
 
@@ -70,5 +92,86 @@ public class SlotExtractionNode {
             return text;
         }
         return text.substring(0, maxLen) + "...";
+    }
+
+    private String renderTemplate(String template, String query) {
+        if (template == null) {
+            return "";
+        }
+        return template.replace("{{query}}", query == null ? "" : query);
+    }
+
+    private boolean applyL2Result(String raw, RouterState state, Map<String, Object> params) {
+        String json = extractJson(raw);
+        if (json == null || json.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            String taskFamily = root.path("taskFamily").asText("").trim();
+            String timeRange = root.path("timeRange").asText(null);
+            String startDate = root.path("startDate").asText(null);
+            String endDate = root.path("endDate").asText(null);
+            int topK = root.path("topK").asInt(5);
+            String source = root.path("source").asText(null);
+            String publisher = root.path("publisher").asText(null);
+            String language = root.path("language").asText(null);
+            double confidence = root.path("confidence").asDouble(0.0);
+            String reason = root.path("reason").asText("");
+
+            if (taskFamily == null || taskFamily.isBlank()) {
+                taskFamily = "QA";
+            }
+            state.setTaskFamily(taskFamily.toUpperCase());
+            state.setTaskConfidence(confidence);
+            state.setTaskReason(reason);
+
+            putIfNotBlank(params, "timeRange", timeRange);
+            putIfNotBlank(params, "time_range", timeRange);
+            putIfNotBlank(params, "startDate", startDate);
+            putIfNotBlank(params, "start_date", startDate);
+            putIfNotBlank(params, "endDate", endDate);
+            putIfNotBlank(params, "end_date", endDate);
+            params.put("topK", topK);
+            putIfNotBlank(params, "source", source);
+            putIfNotBlank(params, "publisher", publisher);
+            putIfNotBlank(params, "language", language);
+
+            state.setParams(params);
+            return true;
+        } catch (Exception e) {
+            log.warn("SlotExtractionNode parse failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void applyDefaultTaskParams(RouterState state, Map<String, Object> params, String reason) {
+        state.setTaskFamily("QA");
+        state.setTaskConfidence(0.0);
+        state.setTaskReason(reason);
+        params.putIfAbsent("topK", 5);
+        state.setParams(params);
+    }
+
+    private void putIfNotBlank(Map<String, Object> params, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            params.put(key, value);
+        }
+    }
+
+    private String extractJson(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return trimmed;
+        }
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return null;
     }
 }

@@ -11,8 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * Planner 客户端（HTTP）。
- */
+ * Planner 瀹㈡埛绔紙HTTP锛夈€? */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -24,8 +23,7 @@ public class PlannerClient {
     private String llmBaseUrl;
 
     /**
-     * 调用 Planner 生成计划。
-     */
+     * 璋冪敤 Planner 鐢熸垚璁″垝銆?     */
     public Plan plan(String query, RouterResult routerResult) {
         String url = llmBaseUrl + "/api/graph/plan";
         PlanRequest request = PlanRequest.builder()
@@ -33,11 +31,11 @@ public class PlannerClient {
                 .routerResult(routerResult)
                 .build();
         try {
-            log.info("调用规划服务FLOW|agent|client=planner|step=start|url={}|next=LLM-Planner", url);
+            log.info("[client] 璋冪敤瑙勫垝鏈嶅姟FLOW|agent|client=planner|step=start|url={}|next=LLM-Planner", url);
             ResponseEntity<Plan> response = restTemplate.postForEntity(url, request, Plan.class);
             Plan body = response.getBody();
             int taskCount = body != null && body.getTasks() != null ? body.getTasks().size() : 0;
-            log.info("规划返回FLOW|agent|client=planner|step=end|taskCount={}|next=执行计划", taskCount);
+            log.info("[client] 瑙勫垝杩斿洖FLOW|agent|client=planner|step=end|taskCount={}|next=鎵ц璁″垝", taskCount);
             return body;
         } catch (Exception e) {
             log.warn("PlannerClient plan failed, error={}", e.getMessage());
@@ -45,3 +43,4 @@ public class PlannerClient {
         }
     }
 }
+

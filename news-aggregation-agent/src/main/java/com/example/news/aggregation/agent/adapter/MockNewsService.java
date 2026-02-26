@@ -24,6 +24,7 @@ public class MockNewsService implements NewsService {
         log.warn("Using MockNewsService - returning mock data for article IDs: {}", articleIds);
 
         // 返回模拟数据
+
         return articleIds.stream()
                 .map(id -> NewsArticle.builder()
                         .id(id)

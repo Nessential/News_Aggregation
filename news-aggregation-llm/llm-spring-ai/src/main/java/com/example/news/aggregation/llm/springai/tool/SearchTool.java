@@ -49,6 +49,7 @@ public class SearchTool {
         log.info("Executing keyword search: query={}, topK={}, mockMode={}", query, topK, mockMode);
 
         // Mock模式：返回模拟数据
+
         if (mockMode) {
             return searchByKeywordMock(query, topK);
         }

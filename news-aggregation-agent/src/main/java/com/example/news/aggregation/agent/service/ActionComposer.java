@@ -39,14 +39,12 @@ public class ActionComposer {
                                        TaskFamily taskFamily) {
         SessionState sessionState = context.getSessionState();
         String sessionId = sessionState.getSessionId();
-        log.info("响应组装开始FLOW|agent|node=action_compose|step=start|sessionId={}|taskFamily={}|next=候选构建",
-                sessionId, taskFamily);
+        log.info("[链路最终] 响应组装开始FLOW|agent|node=action_compose|step=start|sessionId={}|taskFamily={}|next=候选构建", sessionId, taskFamily);
 
         try {
             // 1. 构建候选文档列表
             List<Candidate> candidates = buildCandidates(pipelineResult.getCandidateIds());
-            log.info("候选文档数量FLOW|agent|node=action_compose|step=candidates|sessionId={}|count={}|next=元数据组装",
-                    sessionId, candidates.size());
+            log.info("[链路最终] 候选文档数量FLOW|agent|node=action_compose|step=candidates|sessionId={}|count={}|next=元数据组装", sessionId, candidates.size());
 
             // 2. 组装元数据
             AgentResponse.ResponseMetadata metadata = AgentResponse.ResponseMetadata.builder()
@@ -56,10 +54,10 @@ public class ActionComposer {
                     .pipelineType(determinePipelineType(taskFamily))
                     .remainingBudget(sessionState.getBudget())
                     .build();
-            log.info("响应元数据组装FLOW|agent|node=action_compose|step=metadata|sessionId={}|retrievedCount={}|llmCallCount={}|pipelineType={}|next=最终响应",
-                    sessionId, metadata.getRetrievedCount(), metadata.getLlmCallCount(), metadata.getPipelineType());
+            log.info("[链路最终] 响应元数据组装FLOW|agent|node=action_compose|step=metadata|sessionId={}|retrievedCount={}|llmCallCount={}|pipelineType={}|next=最终响应", sessionId, metadata.getRetrievedCount(), metadata.getLlmCallCount(), metadata.getPipelineType());
 
             // 3. 组装最终响应
+
             return AgentResponse.builder()
                     .sessionId(sessionId)
                     .answer(pipelineResult.getAnswer())
@@ -148,7 +146,7 @@ public class ActionComposer {
     private AgentResponse buildErrorResponse(String sessionId, String errorMessage) {
         return AgentResponse.builder()
                 .sessionId(sessionId)
-                .answer("抱歉，处理您的请求时出现错误：" + errorMessage)
+                .answer("内部错误: " + errorMessage)
                 .candidates(new ArrayList<>())
                 .timestamp(LocalDateTime.now())
                 .build();

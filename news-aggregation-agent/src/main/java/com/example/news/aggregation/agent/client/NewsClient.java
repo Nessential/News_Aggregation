@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 新闻服务客户端（HTTP）。
+ * 新闻服务客户端(HTTP)。
  */
 @Slf4j
 @Component
@@ -36,13 +36,13 @@ public class NewsClient {
                 .ids(ids)
                 .build();
         try {
-            log.info("批量拉取文章FLOW|agent|client=news|step=start|url={}|idsCount={}|next=News服务",
+            log.info("[client] 批量拉取文章FLOW|agent|client=news|step=start|url={}|idsCount={}|next=News服务",
                     url, ids != null ? ids.size() : 0);
             ResponseEntity<ArticlesResponse> response = restTemplate.postForEntity(
                     url, request, ArticlesResponse.class);
             ArticlesResponse body = response.getBody();
             int count = body != null && body.getArticles() != null ? body.getArticles().size() : 0;
-            log.info("批量拉取文章完成FLOW|agent|client=news|step=end|count={}|next=候选组装", count);
+            log.info("[client] 批量拉取文章完成FLOW|agent|client=news|step=end|count={}|next=候选组装", count);
             return body != null && body.getArticles() != null ? body.getArticles() : new ArrayList<>();
         } catch (Exception e) {
             log.warn("NewsClient request failed, error={}", e.getMessage());
@@ -74,7 +74,7 @@ public class NewsClient {
         private String content;
         // 来源
         private String source;
-        // 发布时间（字符串）
+        // 发布时间(字符串)
         private String publishedAt;
     }
 

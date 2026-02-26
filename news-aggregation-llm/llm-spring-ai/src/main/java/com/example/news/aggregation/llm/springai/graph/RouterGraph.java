@@ -55,7 +55,16 @@ public class RouterGraph {
             ));
 
             graph.addEdge(StateGraph.START, "intent_analyze");
-            graph.addEdge("intent_analyze", "reference_resolve");
+            // L1 语义路由：新闻相关才进入后续节点
+            graph.addConditionalEdges("intent_analyze",
+                    state -> CompletableFuture.completedFuture(
+                            shouldProceedForNews(readState(state)) ? "news" : "non_news"
+                    ),
+                    Map.of(
+                            "news", "reference_resolve",
+                            "non_news", StateGraph.END
+                    )
+            );
 
             // 根据指代消解结果决定是否执行槽位提取，避免空查询导致的冗余处理
             graph.addConditionalEdges("reference_resolve",
@@ -90,13 +99,14 @@ public class RouterGraph {
 
         String sessionId = state != null && state.getSessionId() != null ? state.getSessionId() : "unknown";
         // 流程日志：RouterGraph 开始
-        log.info("RouterGraph开始FLOW|router|graph=RouterGraph|step=start|sessionId={}|next=intent_analyze", sessionId);
+        log.info("[链路最终] RouterGraph开始FLOW|router|graph=RouterGraph|step=start|sessionId={}|next=intent_analyze", sessionId);
 
         Optional<OverAllState> result = compiledGraph.invoke(initial);
         if (result.isPresent()) {
             RouterState finalState = readState(result.get());
-            log.info("RouterGraph结束FLOW|router|graph=RouterGraph|step=end|sessionId={}|taskFamily={}|retrievalMode={}|needsClarification={}",
+            log.info("[链路最终] RouterGraph结束FLOW|router|graph=RouterGraph|step=end|sessionId={}|intentScope={}|taskFamily={}|retrievalMode={}|needsClarification={}",
                     sessionId,
+                    finalState.getIntentScope(),
                     finalState.getTaskFamily(),
                     finalState.getRetrievalMode(),
                     finalState.getNeedsClarification());
@@ -131,8 +141,20 @@ public class RouterGraph {
         String sessionId = state.getSessionId() != null ? state.getSessionId() : "unknown";
         String nextNode = shouldExtract ? "slot_extract" : "completeness_check";
         String reason = shouldExtract ? "resolvedQuery 非空" : "resolvedQuery 为空";
-        log.info("节点跳转判定FLOW|router|from=reference_resolve|to={}|reason={}|sessionId={}|shouldExtract={}|resolvedQueryBlank={}",
+        log.info("[链路最终] 节点跳转判定FLOW|router|from=reference_resolve|to={}|reason={}|sessionId={}|shouldExtract={}|resolvedQueryBlank={}",
                 nextNode, reason, sessionId, shouldExtract, resolvedQuery == null || resolvedQuery.isBlank());
         return shouldExtract;
+    }
+
+    private boolean shouldProceedForNews(RouterState state) {
+        if (state == null) {
+            return true;
+        }
+        String scope = state.getIntentScope();
+        boolean isNews = scope == null || !"NON_NEWS".equalsIgnoreCase(scope);
+        String sessionId = state.getSessionId() != null ? state.getSessionId() : "unknown";
+        log.info("[链路最终] 节点跳转判定FLOW|router|from=intent_analyze|to={}|reason=intentScope={}|sessionId={}",
+                isNews ? "reference_resolve" : "END", scope, sessionId);
+        return isNews;
     }
 }

@@ -52,6 +52,21 @@ public class RouterState {
     /** 抽取参数 */
     private Map<String, Object> params;
 
+    /** 一级意图范围：NEWS/NON_NEWS */
+    private String intentScope;
+
+    /** 一级意图置信度 */
+    private Double intentConfidence;
+
+    /** 一级意图原因 */
+    private String intentReason;
+
+    /** 二级意图置信度 */
+    private Double taskConfidence;
+
+    /** 二级意图原因 */
+    private String taskReason;
+
     /** 执行步数 */
     private int stepCount;
 
@@ -72,6 +87,11 @@ public class RouterState {
                 .needsClarification(needsClarification)
                 .clarificationQuestion(clarificationQuestion)
                 .params(params)
+                .intentScope(intentScope)
+                .intentConfidence(intentConfidence)
+                .intentReason(intentReason)
+                .taskConfidence(taskConfidence)
+                .taskReason(taskReason)
                 .build();
     }
 }
