@@ -56,6 +56,7 @@ public class SelfCritiqueNode {
         }
 
         // 3) 基础可用性评分
+
         if (!answer.isBlank()) {
             score += 0.2;
         }

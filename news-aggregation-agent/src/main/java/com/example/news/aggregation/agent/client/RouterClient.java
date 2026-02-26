@@ -13,8 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * LLM Router 客户端（HTTP）。
- */
+ * LLM Router 瀹㈡埛绔紙HTTP锛夈€? */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -26,8 +25,7 @@ public class RouterClient {
     private String routerBaseUrl;
 
     /**
-     * 调用 LLM Router 路由接口。
-     */
+     * 璋冪敤 LLM Router 璺敱鎺ュ彛銆?     */
     public RouterResult route(String sessionId, String query, List<String> history, Map<String, Object> constraints) {
         String url = routerBaseUrl + "/api/router/route";
         RouterRequest request = RouterRequest.builder()
@@ -37,14 +35,14 @@ public class RouterClient {
                 .constraints(constraints)
                 .build();
         try {
-            log.info("调用路由服务FLOW|agent|client=router|step=start|sessionId={}|url={}|next=LLM-Router",
+            log.info("[client] 璋冪敤璺敱鏈嶅姟FLOW|agent|client=router|step=start|sessionId={}|url={}|next=LLM-Router",
                     sessionId, url);
             ResponseEntity<RouterResult> response = restTemplate.postForEntity(
                     url, request, RouterResult.class);
             RouterResult body = response.getBody();
             if (body != null) {
-                log.info("路由返回FLOW|agent|client=router|step=end|sessionId={}|taskFamily={}|retrievalMode={}|next=FSM决策",
-                        sessionId, body.getTaskFamily(), body.getRetrievalMode());
+                log.info("[client] 路由返回FLOW|agent|client=router|step=end|sessionId={}|taskFamily={}|retrievalMode={}|next=FSM决策", sessionId, body.getTaskFamily(), body.getRetrievalMode());
+
             }
             return body;
         } catch (Exception e) {
@@ -53,3 +51,4 @@ public class RouterClient {
         }
     }
 }
+

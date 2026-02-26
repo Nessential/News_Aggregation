@@ -32,11 +32,13 @@ public class OutputValidator {
         List<String> errors = new ArrayList<>();
 
         // 1. 检查答案是否为空
+
         if (draft.getAnswer() == null || draft.getAnswer().trim().isEmpty()) {
             errors.add("Answer is empty");
         }
 
         // 2. 检查答案长度（过短或过长）
+
         if (draft.getAnswer() != null) {
             int length = draft.getAnswer().length();
             if (length < 10) {
@@ -47,16 +49,19 @@ public class OutputValidator {
         }
 
         // 3. 检查质量评分
+
         if (draft.getQualityScore() == null || draft.getQualityScore() < 0.3) {
             errors.add("Quality score too low: " + draft.getQualityScore());
         }
 
         // 4. 检查是否包含引用（可选）
+
         if (draft.getCitations() == null || draft.getCitations().isEmpty()) {
             log.debug("No citations provided (may be acceptable for some queries)");
         }
 
         // 5. 检查危险内容（简单关键词检测）
+
         if (containsDangerousContent(draft.getAnswer())) {
             errors.add("Answer contains potentially dangerous content");
         }

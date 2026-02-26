@@ -75,7 +75,7 @@ public class WorkflowBootstrap {
     private WorkflowDefinition buildTimelineWorkflow() {
         return WorkflowDefinition.builder()
                 .id("TIMELINE_WORKFLOW")
-                .name("新闻时间线总结工作流")
+                .name("新闻时间线工作流")
                 .steps(List.of(
                         WorkflowStep.builder()
                                 .stepId("timeline-retrieve")

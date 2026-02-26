@@ -42,7 +42,7 @@ public class ConversationFSM {
                             ConversationState.DONE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.RUNNING_ASYNC, List.of(ConversationState.DONE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.FAIL_SAFE, List.of(ConversationState.DONE)),
-                    Map.entry(ConversationState.DONE, List.of(ConversationState.DONE))
+                    Map.entry(ConversationState.DONE, List.of(ConversationState.ROUTE, ConversationState.DONE))
             );
 
     /**

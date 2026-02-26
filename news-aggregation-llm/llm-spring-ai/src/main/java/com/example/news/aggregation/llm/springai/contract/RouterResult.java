@@ -35,6 +35,21 @@ public class RouterResult {
     /** 提取的参数（时间/分类/语言等） */
     private Map<String, Object> params;
 
+    /** 一级意图范围：NEWS/NON_NEWS */
+    private String intentScope;
+
+    /** 一级意图置信度 */
+    private Double intentConfidence;
+
+    /** 一级意图原因 */
+    private String intentReason;
+
+    /** 二级意图置信度 */
+    private Double taskConfidence;
+
+    /** 二级意图原因 */
+    private String taskReason;
+
     /**
      * 创建默认QA结果（兜底）
      * 当Router失败时返回此结果
@@ -45,6 +60,9 @@ public class RouterResult {
                 .retrievalMode("HYBRID")
                 .riskLevel("LOW")
                 .needsClarification(false)
+                .intentScope("NEWS")
+                .intentConfidence(0.0)
+                .intentReason("default")
                 .build();
     }
 }

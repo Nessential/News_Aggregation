@@ -57,6 +57,7 @@ public class RetrieveTool {
         log.info("Executing vector retrieval: query={}, topK={}, mockMode={}", query, topK, mockMode);
 
         // Mock模式：返回模拟数据
+
         if (mockMode) {
             return retrieveNewsMock(query, topK);
         }

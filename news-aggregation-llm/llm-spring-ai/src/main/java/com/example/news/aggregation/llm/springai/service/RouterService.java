@@ -36,11 +36,11 @@ public class RouterService {
             String sessionId = request != null && request.getSessionId() != null ? request.getSessionId() : "unknown";
             String query = request != null ? request.getQuery() : null;
             // 流程日志：Router 入口
-            log.info("进入路由入口FLOW|router|entry|sessionId={}|query={}|next=RouterGraph", sessionId, truncate(query, 200));
+            log.info("[entry] 进入路由入口FLOW|router|entry|sessionId={}|query={}|next=RouterGraph", sessionId, truncate(query, 200));
 
             // 配置关闭 RouterGraph 时直接降级
             if (!graphProperties.isRouterEnabled()) {
-                log.info("路由降级-Graph关闭FLOW|router|decision=graph_disabled|sessionId={}", sessionId);
+                log.info("[router] 路由降级-Graph关闭FLOW|router|decision=graph_disabled|sessionId={}", sessionId);
                 return RouterResult.defaultQA();
             }
 
@@ -60,8 +60,8 @@ public class RouterService {
                 return RouterResult.defaultQA();
             }
 
-            log.info("路由结束FLOW|router|exit|sessionId={}|taskFamily={}|retrievalMode={}|needsClarification={}",
-                    sessionId, result.getTaskFamily(), result.getRetrievalMode(), result.getNeedsClarification());
+            log.info("[exit] 路由结束FLOW|router|exit|sessionId={}|intentScope={}|taskFamily={}|retrievalMode={}|needsClarification={}",
+                    sessionId, result.getIntentScope(), result.getTaskFamily(), result.getRetrievalMode(), result.getNeedsClarification());
             return result;
         } catch (Exception e) {
             log.error("RouterService route failed, fallback to default.", e);

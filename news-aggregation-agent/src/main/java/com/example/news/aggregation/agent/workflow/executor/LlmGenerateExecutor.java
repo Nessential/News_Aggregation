@@ -15,9 +15,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * LLM 生成能力。
- * 支持摘要/对比/分析/时间线/问答。
- */
+ * LLM 鐢熸垚鑳藉姏銆? * 鏀寔鎽樿/瀵规瘮/鍒嗘瀽/鏃堕棿绾?闂瓟銆? */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -35,7 +33,7 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         return CapabilityMetadata.builder()
                 .name("llm_generate")
                 .version("v1")
-                .description("基于证据生成答案")
+                .description("鍩轰簬璇佹嵁鐢熸垚绛旀")
                 .timeoutMs(15000L)
                 .costLevel("HIGH")
                 .permissionScope("INTERNAL")
@@ -61,13 +59,12 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         List<RetrievalResult> evidence = convertEvidence(context.getEvidence());
         String sessionId = context != null ? context.getSessionId() : "unknown";
         int evidenceCount = evidence != null ? evidence.size() : 0;
-        String reason = allowNoEvidence ? "无需证据直答" : "证据齐备";
-        log.info("开始生成FLOW|agent|node=llm_generate|step=start|sessionId={}|taskFamily={}|evidenceCount={}|retrievalMode={}|reason={}|next=LLM生成",
-                sessionId, taskFamily, evidenceCount, retrievalMode, reason);
+        String reason = allowNoEvidence ? "无需证据直答" : "需要证据生成";
+        log.info("[链路最终] 开始生成FLOW|agent|node=llm_generate|step=start|sessionId={}|taskFamily={}|evidenceCount={}|retrievalMode={}|reason={}|next=LLM生成", sessionId, taskFamily, evidenceCount, retrievalMode, reason);
 
         GeneratorDraft draft = generatorClient.generate(context.getQuery(), taskFamily, evidence, retrievalMode);
         if (draft == null || draft.getAnswer() == null || draft.getAnswer().isBlank()) {
-            String fallback = "生成失败或证据不足。";
+            String fallback = "证据不足或质量不足";
             context.putAttribute("answer", fallback);
             log.warn("llm_generate fallback, empty draft.");
             return fallback;
@@ -75,7 +72,7 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
 
         context.putAttribute("answer", draft.getAnswer());
         context.putAttribute("citations", draft.getCitations());
-        log.info("生成完成FLOW|agent|node=llm_generate|step=end|sessionId={}|answerLength={}|next=响应组装",
+        log.info("[链路最终] 鐢熸垚瀹屾垚FLOW|agent|node=llm_generate|step=end|sessionId={}|answerLength={}|next=鍝嶅簲缁勮",
                 sessionId, draft.getAnswer().length());
         return draft.getAnswer();
     }
@@ -96,3 +93,4 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
                 .collect(Collectors.toList());
     }
 }
+

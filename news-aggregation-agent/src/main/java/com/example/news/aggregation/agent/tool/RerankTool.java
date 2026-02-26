@@ -63,6 +63,7 @@ public class RerankTool implements Tool<RerankTool.RerankInput, List<RetrievalRe
         Map<Long, RetrievalResult> resultMap = new HashMap<>();
 
         // 计算每个文档的 RRF 得分
+
         for (List<RetrievalResult> results : resultLists) {
             for (int rank = 0; rank < results.size(); rank++) {
                 RetrievalResult result = results.get(rank);
@@ -111,6 +112,7 @@ public class RerankTool implements Tool<RerankTool.RerankInput, List<RetrievalRe
         selectedIds.add(first.getArticleId());
 
         // 迭代选择剩余文档
+
         while (selected.size() < topK && !candidates.isEmpty()) {
             int bestIndex = -1;
             double bestScore = Double.NEGATIVE_INFINITY;

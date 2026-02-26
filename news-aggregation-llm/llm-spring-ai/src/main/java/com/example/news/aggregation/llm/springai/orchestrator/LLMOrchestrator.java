@@ -59,6 +59,7 @@ public class LLMOrchestrator {
             RouterResult routerResult = route(sessionId, userMessage);
 
             // 2) 澄清
+
             if (Boolean.TRUE.equals(routerResult.getNeedsClarification())) {
                 return ChatResponse.builder()
                         .sessionId(sessionId)
@@ -92,6 +93,7 @@ public class LLMOrchestrator {
             );
 
             // 6) 构建响应
+
             return buildResponse(sessionId, draft, rerankedResults, routerResult);
 
         } catch (Exception e) {

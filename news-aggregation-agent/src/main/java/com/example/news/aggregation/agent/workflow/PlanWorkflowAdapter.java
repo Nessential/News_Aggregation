@@ -69,6 +69,7 @@ public class PlanWorkflowAdapter {
                 List<String> dependencies = new ArrayList<>();
 
                 // 第一个工具继承任务依赖，其余工具依赖前一步
+
                 if (previousStepId == null) {
                     List<String> taskDeps = task.getDependencies();
                     if (taskDeps != null) {

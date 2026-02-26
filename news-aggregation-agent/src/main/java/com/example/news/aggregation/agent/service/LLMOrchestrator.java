@@ -55,7 +55,7 @@ public class LLMOrchestrator {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
         SessionState sessionState = getOrCreateSession(request, userId);
         String sessionId = sessionState.getSessionId();
-        log.info("【链路】开始处理对话: sessionId={}, userId={}, query={}", sessionId, userId, request.getQuery());
+        log.info("[链路最终] 开始处理对话: sessionId={}, userId={}, query={}", sessionId, userId, request.getQuery());
 
         if (sessionState.isBudgetExhausted()) {
             return buildBudgetExhaustedResponse(sessionState);
@@ -64,7 +64,7 @@ public class LLMOrchestrator {
         sessionManager.addHistory(sessionId, "User: " + request.getQuery());
 
         // 1. FSM 进入 ROUTE
-        log.info("进入路由阶段FLOW|agent|fsm|from={}|to={}|reason=收到用户请求|next=Router",
+        log.info("[fsm] 进入路由阶段FLOW|agent|fsm|from={}|to={}|reason=收到用户请求|next=Router",
                 sessionState.getConversationState(), ConversationState.ROUTE);
         transitionState(sessionState, ConversationState.ROUTE);
 
@@ -78,13 +78,13 @@ public class LLMOrchestrator {
         if (routerResult == null) {
             routerResult = RouterResult.defaultQA();
         }
-        log.info("【链路】路由完成: sessionId={}, taskFamily={}, retrievalMode={}, needsClarification={}",
+        log.info("[链路最终] 路由完成: sessionId={}, taskFamily={}, retrievalMode={}, needsClarification={}",
                 sessionId, routerResult.getTaskFamily(), routerResult.getRetrievalMode(), routerResult.getNeedsClarification());
 
         TaskFamily taskFamily = TaskFamily.valueOf(routerResult.getTaskFamily());
         boolean directAnswer = "NONE".equalsIgnoreCase(routerResult.getRetrievalMode());
 
-        // 3. FSM 判断是否需要澄清
+        // 3. FSM 判断是否需要澄清或规划
         FSMContext fsmContext = FSMContext.builder()
                 .routerResult(routerResult)
                 .needsClarification(routerResult.getNeedsClarification())
@@ -101,8 +101,9 @@ public class LLMOrchestrator {
         } else {
             routeReason = "默认进入检索";
         }
-        log.info("路由决策FLOW|agent|fsm|from=ROUTE|to={}|reason={}|next={}",
-                nextAfterRoute, routeReason,
+        log.info("[fsm] 路由决策FLOW|agent|fsm|from=ROUTE|to={}|reason={}|next={}",
+                nextAfterRoute,
+                routeReason,
                 nextAfterRoute == ConversationState.NEED_CLARIFY ? "Clarification" :
                         (nextAfterRoute == ConversationState.PLAN ? "Planner" : "Workflow"));
         transitionState(sessionState, nextAfterRoute);
@@ -123,62 +124,64 @@ public class LLMOrchestrator {
             workflowContext.putAttribute("filters", filters);
         }
 
-        // 5. 执行计划或显式工作流
+        // 5. 执行规划或显式工作流
         if (nextAfterRoute == ConversationState.BUILD_EVIDENCE && directAnswer) {
-            log.info("直接回答路径FLOW|agent|fsm|from=ROUTE|to=BUILD_EVIDENCE|reason=无需检索|next=GenerateOnly");
+            log.info("[fsm] 进入证据构建FLOW|agent|fsm|from={}|to=BUILD_EVIDENCE|reason=无需检索直答|next=EvidenceCheck",
+                    sessionState.getConversationState());
             transitionState(sessionState, ConversationState.BUILD_EVIDENCE);
             WorkflowDefinition directWorkflow = buildDirectWorkflow(routerResult.getTaskFamily(), routerResult.getRetrievalMode());
             workflowOrchestrator.executeWorkflow(directWorkflow, workflowContext);
         } else {
-        boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
-        log.info("【链路】执行策略: sessionId={}, usePlanner={}, taskFamily={}", sessionId, usePlanner, taskFamily);
-        if (usePlanner) {
-            if (sessionState.getConversationState() != ConversationState.PLAN) {
-                log.info("进入规划阶段FLOW|agent|fsm|from={}|to=PLAN|reason=复杂任务或路由要求|next=Planner",
-                        sessionState.getConversationState());
-                transitionState(sessionState, ConversationState.PLAN);
-            }
-            Plan plan = plannerClient.plan(request.getQuery(), routerResult);
-            if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
-                plan = buildDefaultPlan(taskFamily, request.getQuery());
-            }
-            int planTaskCount = plan.getTasks() != null ? plan.getTasks().size() : 0;
-            log.info("【链路】规划结果: sessionId={}, taskCount={}", sessionId, planTaskCount);
-            fsmContext.setPlan(plan);
-            ConversationState nextAfterPlan = conversationFSM.nextState(ConversationState.PLAN, fsmContext);
-            log.info("规划后状态FLOW|agent|fsm|from=PLAN|to={}|reason=计划已生成|next=Workflow", nextAfterPlan);
-            transitionState(sessionState, nextAfterPlan);
-            workflowOrchestrator.executePlan(plan, workflowContext);
-        } else {
-            if (sessionState.getConversationState() != ConversationState.RETRIEVE) {
-                log.info("进入检索阶段FLOW|agent|fsm|from={}|to=RETRIEVE|reason=无需规划|next=Workflow",
-                        sessionState.getConversationState());
-                transitionState(sessionState, ConversationState.RETRIEVE);
-            }
-            String workflowId = resolveWorkflowId(taskFamily);
-            if (workflowOrchestrator.hasWorkflow(workflowId)) {
-                workflowOrchestrator.executeWorkflow(workflowId, workflowContext);
+            boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
+            log.info("[链路最终] 执行策略: sessionId={}, usePlanner={}, taskFamily={}", sessionId, usePlanner, taskFamily);
+            if (usePlanner) {
+                if (sessionState.getConversationState() != ConversationState.PLAN) {
+                    log.info("[fsm] 进入规划阶段FLOW|agent|fsm|from={}|to=PLAN|reason=复杂任务或路由要求|next=Planner",
+                            sessionState.getConversationState());
+                    transitionState(sessionState, ConversationState.PLAN);
+                }
+                Plan plan = plannerClient.plan(request.getQuery(), routerResult);
+                if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
+                    plan = buildDefaultPlan(taskFamily, request.getQuery());
+                }
+                int planTaskCount = plan.getTasks() != null ? plan.getTasks().size() : 0;
+                log.info("[链路最终] 规划结果: sessionId={}, taskCount={}", sessionId, planTaskCount);
+                fsmContext.setPlan(plan);
+                ConversationState nextAfterPlan = conversationFSM.nextState(ConversationState.PLAN, fsmContext);
+                log.info("[fsm] 规划后状态FLOW|agent|fsm|from=PLAN|to={}|reason=计划已生成|next=Workflow", nextAfterPlan);
+                transitionState(sessionState, nextAfterPlan);
+                workflowOrchestrator.executePlan(plan, workflowContext);
             } else {
-                Plan fallbackPlan = buildDefaultPlan(taskFamily, request.getQuery());
-                workflowOrchestrator.executePlan(fallbackPlan, workflowContext);
+                if (sessionState.getConversationState() != ConversationState.RETRIEVE) {
+                    log.info("[fsm] 进入检索阶段FLOW|agent|fsm|from={}|to=RETRIEVE|reason=无需规划|next=Workflow",
+                            sessionState.getConversationState());
+                    transitionState(sessionState, ConversationState.RETRIEVE);
+                }
+                String workflowId = resolveWorkflowId(taskFamily);
+                if (workflowOrchestrator.hasWorkflow(workflowId)) {
+                    workflowOrchestrator.executeWorkflow(workflowId, workflowContext);
+                } else {
+                    Plan fallbackPlan = buildDefaultPlan(taskFamily, request.getQuery());
+                    workflowOrchestrator.executePlan(fallbackPlan, workflowContext);
+                }
             }
         }
-        }
-        log.info("【链路】检索结束: sessionId={}, evidenceCount={}", sessionId, workflowContext.getEvidence().size());
+
+        log.info("[链路最终] 检索结束: sessionId={}, evidenceCount={}", sessionId, workflowContext.getEvidence().size());
 
         // 6. FSM：构建证据 -> 生成 -> 校验
         fsmContext.setEvidenceCount(workflowContext.getEvidence().size());
-        log.info("进入证据构建FLOW|agent|fsm|from={}|to=BUILD_EVIDENCE|reason=检索结束|next=EvidenceCheck",
+        log.info("[fsm] 进入证据构建FLOW|agent|fsm|from={}|to=BUILD_EVIDENCE|reason=检索结束|next=EvidenceCheck",
                 sessionState.getConversationState());
         transitionState(sessionState, ConversationState.BUILD_EVIDENCE);
         ConversationState nextAfterEvidence = conversationFSM.nextState(ConversationState.BUILD_EVIDENCE, fsmContext);
-        log.info("证据判断FLOW|agent|fsm|from=BUILD_EVIDENCE|to={}|reason=evidenceCount={}|next={}",
+        log.info("[fsm] 证据判断FLOW|agent|fsm|from=BUILD_EVIDENCE|to={}|reason=evidenceCount={}|next={}",
                 nextAfterEvidence,
                 workflowContext.getEvidence().size(),
                 nextAfterEvidence == ConversationState.GENERATE ? "Generate" : "Retrieve");
         transitionState(sessionState, nextAfterEvidence);
         if (nextAfterEvidence == ConversationState.GENERATE) {
-            log.info("进入生成校验FLOW|agent|fsm|from=GENERATE|to=VALIDATE|reason=证据充足|next=Validate",
+            log.info("[fsm] 进入生成校验FLOW|agent|fsm|from=GENERATE|to=VALIDATE|reason=证据充足|next=Validate",
                     sessionState.getConversationState());
             transitionState(sessionState, ConversationState.VALIDATE);
         }
@@ -187,7 +190,7 @@ public class LLMOrchestrator {
         int answerLength = pipelineResult.getAnswer() != null ? pipelineResult.getAnswer().length() : 0;
         int candidateCount = pipelineResult.getCandidateIds() != null ? pipelineResult.getCandidateIds().size() : 0;
         int citationCount = pipelineResult.getCitations() != null ? pipelineResult.getCitations().size() : 0;
-        log.info("【链路】生成结果: sessionId={}, answerLength={}, candidateCount={}, citationCount={}",
+        log.info("[链路最终] 生成结果: sessionId={}, answerLength={}, candidateCount={}, citationCount={}",
                 sessionId, answerLength, candidateCount, citationCount);
 
         // 7. 消耗预算
@@ -206,13 +209,14 @@ public class LLMOrchestrator {
             sessionManager.updateCandidates(sessionId, pipelineResult.getCandidateIds());
         }
         sessionManager.addHistory(sessionId, "Agent: " + response.getAnswer());
-        log.info("对话结束FLOW|agent|fsm|from={}|to=DONE|reason=响应已生成|next=结束",
+        log.info("[fsm] 对话结束FLOW|agent|fsm|from={}|to=DONE|reason=响应已生成|next=结束",
                 sessionState.getConversationState());
         transitionState(sessionState, ConversationState.DONE);
-        log.info("【链路】响应完成: sessionId={}, taskFamily={}", sessionId, taskFamily);
+        log.info("[链路最终] 响应完成: sessionId={}, taskFamily={}", sessionId, taskFamily);
 
         return response;
     }
+
 
     private SessionState getOrCreateSession(ChatRequest request, String userId) {
         if (request.getSessionId() != null) {
@@ -402,11 +406,11 @@ public class LLMOrchestrator {
             conversationFSM.validateTransition(current, target);
             sessionManager.updateConversationState(sessionState.getSessionId(), target);
             sessionState.setConversationState(target);
-            log.info("【链路】FSM 过渡: sessionId={}, from={}, to={}", sessionState.getSessionId(), current, target);
+            log.info("[fsm] FSM 过渡: sessionId={}, from={}, to={}", sessionState.getSessionId(), current, target);
         } catch (Exception e) {
             sessionManager.updateConversationState(sessionState.getSessionId(), ConversationState.FAIL_SAFE);
             sessionState.setConversationState(ConversationState.FAIL_SAFE);
-            log.warn("FSM transition rejected: {} -> {}, error={}", current, target, e.getMessage());
+            log.warn("[fsm] FSM 过渡被拒绝: {} -> {}, error={}", current, target, e.getMessage());
         }
     }
 }
