@@ -21,7 +21,7 @@ public class ConversationFSM {
             Map.ofEntries(
                     Map.entry(ConversationState.START, List.of(ConversationState.ROUTE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.ROUTE, List.of(ConversationState.NEED_CLARIFY, ConversationState.PLAN,
-                            ConversationState.RETRIEVE, ConversationState.FAIL_SAFE)),
+                            ConversationState.RETRIEVE, ConversationState.BUILD_EVIDENCE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.NEED_CLARIFY, List.of(ConversationState.ROUTE, ConversationState.DONE,
                             ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.PLAN, List.of(ConversationState.RETRIEVE, ConversationState.FAIL_SAFE)),
@@ -99,11 +99,20 @@ public class ConversationFSM {
         return allowed.contains(to);
     }
 
+    // ======== 状态分支判断 ========
+
     private ConversationState routeNext(FSMContext context) {
         if (Boolean.TRUE.equals(context.getNeedsClarification())) {
             return ConversationState.NEED_CLARIFY;
         }
+        if (Boolean.TRUE.equals(context.getDirectAnswer())) {
+            return ConversationState.BUILD_EVIDENCE;
+        }
         if (context.getRouterResult() != null) {
+            String retrievalMode = context.getRouterResult().getRetrievalMode();
+            if ("NONE".equalsIgnoreCase(retrievalMode)) {
+                return ConversationState.BUILD_EVIDENCE;
+            }
             TaskFamily taskFamily = TaskFamily.valueOf(context.getRouterResult().getTaskFamily());
             if (taskFamily == TaskFamily.COMPARE
                     || taskFamily == TaskFamily.DEEP_DIVE) {
@@ -114,6 +123,9 @@ public class ConversationFSM {
     }
 
     private ConversationState buildEvidenceNext(FSMContext context) {
+        if (Boolean.TRUE.equals(context.getDirectAnswer())) {
+            return ConversationState.GENERATE;
+        }
         Integer count = context.getEvidenceCount();
         if (count == null && context.getEvidence() != null) {
             count = context.getEvidence().size();

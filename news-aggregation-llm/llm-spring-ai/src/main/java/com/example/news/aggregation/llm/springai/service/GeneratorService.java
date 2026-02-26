@@ -33,17 +33,20 @@ public class GeneratorService {
      * @param evidence 证据列表
      * @return 生成草稿
      */
-    public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence) {
+    public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
         // 配置关闭GeneratorGraph时直接降级
         if (!graphProperties.isGeneratorEnabled()) {
             return GeneratorDraft.conservative("生成能力未启用");
         }
 
         int maxRetries = graphProperties.getMaxIterations();
+        boolean allowNoEvidence = "NONE".equalsIgnoreCase(retrievalMode);
 
         GeneratorState state = GeneratorState.builder()
                 .query(query)
                 .taskFamily(taskFamily)
+                .retrievalMode(retrievalMode)
+                .allowNoEvidence(allowNoEvidence)
                 .evidence(evidence)
                 .maxRetries(maxRetries)
                 .retryCount(0)
@@ -61,6 +64,13 @@ public class GeneratorService {
             // 同步质量评分
             draft.setQualityScore(finalState.getQualityScore());
 
+            if (allowNoEvidence) {
+                if (draft.getAnswer() == null || draft.getAnswer().isBlank()) {
+                    return GeneratorDraft.conservative("暂无可用答案");
+                }
+                return draft;
+            }
+
             if (!validator.validate(draft)) {
                 log.warn("GeneratorDraft validation failed, fallback to conservative answer.");
                 return GeneratorDraft.conservative("证据不足或质量不足");
@@ -71,5 +81,9 @@ public class GeneratorService {
             log.error("GeneratorService generate failed.", e);
             return GeneratorDraft.conservative("生成过程中发生错误");
         }
+    }
+
+    public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence) {
+        return generate(query, taskFamily, evidence, null);
     }
 }

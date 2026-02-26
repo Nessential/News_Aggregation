@@ -77,6 +77,7 @@ public class RssFetchServiceImpl implements RssFetchService {
                     log.debug("新闻已存在，跳过:{}",news.getLink());
                     continue;
                 }
+
 //              保存图片
                 String originImageUrl = news.getImage_url();
                 String finalImageUrl = storageService.uploadFromUrl(originImageUrl,source.getName(),news.getTitle());

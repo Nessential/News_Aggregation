@@ -5,6 +5,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.example.news.aggregation.llm.springai.prompt.PromptRegistry;
 
 /**
  * Spring AI 配置类
@@ -28,9 +29,12 @@ public class AiConfig {
      * 用于Agent模块的Pipeline调用
      */
     @Bean
-    public ChatClient chatClient(ChatClient.Builder builder) {
-        return builder
-                .defaultSystem("You are a helpful AI assistant for news aggregation and analysis.")
-                .build();
+    public ChatClient chatClient(ChatClient.Builder builder, PromptRegistry promptRegistry) {
+        String systemPrompt = promptRegistry.getPrompt("system-default", "");
+        ChatClient.Builder configured = builder;
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            configured = configured.defaultSystem(systemPrompt);
+        }
+        return configured.build();
     }
 }

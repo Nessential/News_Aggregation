@@ -45,7 +45,8 @@ public class GraphTestController {
         GeneratorDraft draft = generatorService.generate(
                 request.getQuery(),
                 request.getTaskFamily(),
-                request.getEvidence()
+                request.getEvidence(),
+                request.getRetrievalMode()
         );
         return ResponseEntity.ok(draft);
     }

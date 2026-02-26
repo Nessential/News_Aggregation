@@ -24,6 +24,11 @@ public class QualityCheckNode {
     public GeneratorState execute(GeneratorState state) {
         state.incrementStep();
 
+        if (Boolean.TRUE.equals(state.getAllowNoEvidence())) {
+            state.setValidated(true);
+            return state;
+        }
+
         GeneratorDraft draft = state.getDraft();
         if (draft == null) {
             state.setValidated(false);

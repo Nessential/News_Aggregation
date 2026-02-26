@@ -38,10 +38,15 @@ public class ActionComposer {
                                        PipelineContext context,
                                        TaskFamily taskFamily) {
         SessionState sessionState = context.getSessionState();
+        String sessionId = sessionState.getSessionId();
+        log.info("响应组装开始FLOW|agent|node=action_compose|step=start|sessionId={}|taskFamily={}|next=候选构建",
+                sessionId, taskFamily);
 
         try {
             // 1. 构建候选文档列表
             List<Candidate> candidates = buildCandidates(pipelineResult.getCandidateIds());
+            log.info("候选文档数量FLOW|agent|node=action_compose|step=candidates|sessionId={}|count={}|next=元数据组装",
+                    sessionId, candidates.size());
 
             // 2. 组装元数据
             AgentResponse.ResponseMetadata metadata = AgentResponse.ResponseMetadata.builder()
@@ -51,10 +56,12 @@ public class ActionComposer {
                     .pipelineType(determinePipelineType(taskFamily))
                     .remainingBudget(sessionState.getBudget())
                     .build();
+            log.info("响应元数据组装FLOW|agent|node=action_compose|step=metadata|sessionId={}|retrievedCount={}|llmCallCount={}|pipelineType={}|next=最终响应",
+                    sessionId, metadata.getRetrievedCount(), metadata.getLlmCallCount(), metadata.getPipelineType());
 
-            // 3. 组装 AgentResponse
+            // 3. 组装最终响应
             return AgentResponse.builder()
-                    .sessionId(sessionState.getSessionId())
+                    .sessionId(sessionId)
                     .answer(pipelineResult.getAnswer())
                     .candidates(candidates)
                     .citations(pipelineResult.getCitations())
@@ -67,7 +74,7 @@ public class ActionComposer {
 
         } catch (Exception e) {
             log.error("Failed to build response", e);
-            return buildErrorResponse(sessionState.getSessionId(), e.getMessage());
+            return buildErrorResponse(sessionId, e.getMessage());
         }
     }
 
@@ -80,13 +87,14 @@ public class ActionComposer {
         }
 
         try {
+            log.info("关键路径-拉取候选文档开始: count={}", articleIds.size());
             // 批量拉取文章详情
             Map<Long, NewsClient.NewsArticleDto> articleMap = newsClient.getArticlesByIds(articleIds)
                     .stream()
                     .collect(Collectors.toMap(NewsClient.NewsArticleDto::getId, article -> article));
 
             // 映射为 Candidate
-            return articleIds.stream()
+            List<Candidate> candidates = articleIds.stream()
                     .map(id -> {
                         NewsClient.NewsArticleDto article = articleMap.get(id);
                         if (article == null) {
@@ -97,6 +105,8 @@ public class ActionComposer {
                     })
                     .filter(candidate -> candidate != null)
                     .collect(Collectors.toList());
+            log.info("关键路径-候选文档组装完成: count={}", candidates.size());
+            return candidates;
 
         } catch (Exception e) {
             log.error("Failed to fetch article details", e);

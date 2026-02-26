@@ -32,18 +32,21 @@ public class ChatController {
      */
     @PostMapping("/chat")
     public ResponseEntity<AgentResponse> chat(@RequestBody ChatRequest request) {
-        log.info("接收 query: sessionId={}, query={}", request.getSessionId(), request.getQuery());
+        log.info("接收对话请求: sessionId={}, query={}", request.getSessionId(), request.getQuery());
         try {
             if (request.getUserId() == null || request.getUserId().isBlank()) {
                 request.setUserId("anonymous");
             }
+            log.info("进入对话入口FLOW|agent|entry|sessionId={}|userId={}|query={}",
+                    request.getSessionId(), request.getUserId(), truncate(request.getQuery(), 200));
+            // 统一编排入口
             AgentResponse response = llmOrchestrator.handleChat(request);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Chat request failed", e);
             return ResponseEntity.status(500).body(buildErrorResponse(
                     request.getSessionId(),
-                    "Internal error: " + e.getMessage()
+                    "内部错误: " + e.getMessage()
             ));
         }
     }
@@ -95,5 +98,15 @@ public class ChatController {
                 .answer("抱歉，处理您的请求时出现错误：" + errorMessage)
                 .timestamp(LocalDateTime.now())
                 .build();
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 }

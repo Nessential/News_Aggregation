@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * RouterGraph状态
- * 记录路由识别过程中的输入与输出
+ * RouterGraph 状态。
+ * 记录路由识别过程中的输入与输出。
  */
 @Data
 @Builder
@@ -19,7 +19,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class RouterState {
 
-    /** 会话ID */
+    /** 会话 ID */
     private String sessionId;
 
     /** 原始查询 */
@@ -49,7 +49,7 @@ public class RouterState {
     /** 澄清问题 */
     private String clarificationQuestion;
 
-    /** 提取参数 */
+    /** 抽取参数 */
     private Map<String, Object> params;
 
     /** 执行步数 */
@@ -58,12 +58,12 @@ public class RouterState {
     /** 错误信息 */
     private String error;
 
-    /** 步数+1 */
+    /** 步数 +1 */
     public void incrementStep() {
         this.stepCount++;
     }
 
-    /** 转换为RouterResult */
+    /** 转换为 RouterResult */
     public RouterResult toRouterResult() {
         return RouterResult.builder()
                 .taskFamily(taskFamily)

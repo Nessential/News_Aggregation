@@ -25,6 +25,12 @@ public class GeneratorState {
     /** 任务类型 */
     private String taskFamily;
 
+    /** 检索模式 */
+    private String retrievalMode;
+
+    /** 是否允许无证据直接回答 */
+    private Boolean allowNoEvidence;
+
     /** 证据列表 */
     private List<RetrievalResult> evidence;
 

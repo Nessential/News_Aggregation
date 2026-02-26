@@ -49,9 +49,13 @@ public class SearchNewsExecutor implements CapabilityExecutor {
                 : 10;
 
         Map<String, Object> filters = extractFilters(parameters, context);
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("开始关键词检索FLOW|agent|node=search_news|step=start|sessionId={}|topK={}|query={}|reason=任务规划/默认检索|next=检索服务",
+                sessionId, topK, query);
         List<RetrievalResult> results = retrievalClient.keywordSearch(query, topK, filters);
         context.addEvidence(results);
-        log.info("search_news results: {}", results.size());
+        log.info("关键词检索完成FLOW|agent|node=search_news|step=end|sessionId={}|resultCount={}|next=证据汇总/后续节点",
+                sessionId, results.size());
         return results;
     }
 

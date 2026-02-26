@@ -1,1 +1,41 @@
-package com.example.news.aggregation.agent.domain;import lombok.AllArgsConstructor;import lombok.Builder;import lombok.Data;import lombok.NoArgsConstructor;import java.io.Serializable;/** * 候选文章 * Agent响应中返回的文章摘要信息 */@Data@Builder@NoArgsConstructor@AllArgsConstructorpublic class Candidate implements Serializable {    private static final long serialVersionUID = 1L;        /**     * 文章ID     */    private Long articleId;        /**     * 文章标题     */    private String title;        /**     * 文章URL     */    private String url;        /**     * 摘要片段     */    private String snippet;        /**     * 相关性得分     */    private Double score;        /**     * 来源     */    private String source;        /**     * 发布时间     */    private String publishedAt;}
+package com.example.news.aggregation.agent.domain;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.io.Serializable;
+
+/**
+ * 候选文档。
+ * Agent 响应中返回的文章摘要信息。
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Candidate implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    /** 文章 ID */
+    private Long articleId;
+
+    /** 文章标题 */
+    private String title;
+
+    /** 文章 URL */
+    private String url;
+
+    /** 摘要片段 */
+    private String snippet;
+
+    /** 相关性得分 */
+    private Double score;
+
+    /** 来源 */
+    private String source;
+
+    /** 发布时间 */
+    private String publishedAt;
+}

@@ -52,6 +52,13 @@ app:
     elasticsearch:
       index-name: ${ES_INDEX:news_articles}
 
+    # 意图识别配置
+    intent:
+      rules-path: classpath:intent/intent-rules.yml
+    prompts:
+      base-path: classpath:prompts/
+      suffix: .txt
+
     # MCP工具配置
     mcp:
       local-tools-enabled: true

@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 检索服务客户端（HTTP）
+ * 检索服务客户端（HTTP）。
  */
 @Slf4j
 @Component
@@ -30,42 +30,42 @@ public class RetrievalClient {
     private String retrievalBaseUrl;
 
     /**
-     * 关键词检索（ES）
+     * 关键词检索（ES）。
      */
     public List<RetrievalResult> keywordSearch(String query, int topK) {
         return post("/api/news/retrieval/keyword", query, topK, null, null);
     }
 
     /**
-     * 关键词检索（ES）
+     * 关键词检索（ES）。
      */
     public List<RetrievalResult> keywordSearch(String query, int topK, Map<String, Object> filters) {
         return post("/api/news/retrieval/keyword", query, topK, null, filters);
     }
 
     /**
-     * 向量检索（Qdrant）
+     * 向量检索（Qdrant）。
      */
     public List<RetrievalResult> vectorSearch(String query, int topK, double minScore) {
         return post("/api/news/retrieval/vector", query, topK, minScore, null);
     }
 
     /**
-     * 向量检索（Qdrant）
+     * 向量检索（Qdrant）。
      */
     public List<RetrievalResult> vectorSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/vector", query, topK, minScore, filters);
     }
 
     /**
-     * 混合检索（向量 + 关键词 + RRF + 去重）
+     * 混合检索（向量 + 关键词 + RRF + 去重）。
      */
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, null);
     }
 
     /**
-     * 混合检索（向量 + 关键词 + RRF + 去重）
+     * 混合检索（向量 + 关键词 + RRF + 去重）。
      */
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, filters);
@@ -80,10 +80,13 @@ public class RetrievalClient {
                 .filters(filters)
                 .build();
         try {
+            log.info("调用检索服务FLOW|agent|client=retrieval|step=start|url={}|topK={}|minScore={}|next=检索服务",
+                    url, topK, minScore);
             ResponseEntity<RetrievalResponse> response = restTemplate.postForEntity(
                     url, request, RetrievalResponse.class);
             RetrievalResponse body = response.getBody();
             if (body == null || body.getResults() == null) {
+                log.info("检索返回空FLOW|agent|client=retrieval|step=end|url={}|resultCount=0|next=证据汇总", url);
                 return new ArrayList<>();
             }
             List<RetrievalResult> results = new ArrayList<>();
@@ -98,6 +101,8 @@ public class RetrievalClient {
                         .metadata(item.getMetadata())
                         .build());
             }
+            log.info("检索完成FLOW|agent|client=retrieval|step=end|url={}|resultCount={}|next=证据汇总",
+                    url, results.size());
             return results;
         } catch (Exception e) {
             log.warn("RetrievalClient request failed: path={}, error={}", path, e.getMessage());

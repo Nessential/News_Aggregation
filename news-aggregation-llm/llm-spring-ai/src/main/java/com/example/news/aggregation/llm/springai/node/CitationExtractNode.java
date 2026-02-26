@@ -36,6 +36,9 @@ public class CitationExtractNode {
         if (draft == null || draft.getAnswer() == null) {
             return state;
         }
+        if (draft.getCitations() != null && !draft.getCitations().isEmpty()) {
+            return state;
+        }
 
         List<GeneratorDraft.Citation> citations = extractCitations(draft.getAnswer(), state.getEvidence());
         draft.setCitations(citations);

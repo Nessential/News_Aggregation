@@ -47,10 +47,14 @@ public class RerankExecutor implements CapabilityExecutor {
         double lambda = parameters != null && parameters.get("lambda") instanceof Number
                 ? ((Number) parameters.get("lambda")).doubleValue()
                 : 0.7;
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("开始重排FLOW|agent|node=rerank_results|step=start|sessionId={}|topK={}|lambda={}|reason=提升多样性与相关性|next=重排算法",
+                sessionId, topK, lambda);
 
         List<RetrievalResult> results = rerankTool.mmrRerank(context.getEvidence(), topK, lambda);
         context.setEvidence(results);
-        log.info("rerank_results output: {}", results.size());
+        log.info("重排完成FLOW|agent|node=rerank_results|step=end|sessionId={}|resultCount={}|next=生成",
+                sessionId, results.size());
         return results;
     }
 }

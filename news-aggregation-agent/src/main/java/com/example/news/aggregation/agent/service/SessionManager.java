@@ -199,7 +199,7 @@ public class SessionManager {
     }
 
     /**
-     * 生成会话ID。
+     * 生成会话 ID。
      */
     private String generateSessionId() {
         return UUID.randomUUID().toString().replace("-", "");

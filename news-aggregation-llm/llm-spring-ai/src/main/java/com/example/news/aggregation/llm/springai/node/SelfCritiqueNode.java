@@ -43,7 +43,12 @@ public class SelfCritiqueNode {
         }
 
         // 2) 引用数量评分
-        int citationCount = countCitations(answer);
+        int citationCount = 0;
+        if (state.getDraft() != null && state.getDraft().getCitations() != null) {
+            citationCount = state.getDraft().getCitations().size();
+        } else {
+            citationCount = countCitations(answer);
+        }
         if (citationCount >= 2 && citationCount <= 5) {
             score += 0.4;
         } else if (citationCount == 1) {

@@ -54,6 +54,9 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
                 ? String.valueOf(parameters.get("mode")).toUpperCase()
                 : "HYBRID";
         Map<String, Object> filters = extractFilters(parameters, context);
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("开始向量/混合检索FLOW|agent|node=retrieve_news|step=start|sessionId={}|mode={}|topK={}|minScore={}|query={}|reason=需要证据|next=检索服务",
+                sessionId, mode, topK, minScore, query);
 
         List<RetrievalResult> results;
         if ("VECTOR".equals(mode)) {
@@ -63,7 +66,8 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
         }
 
         context.addEvidence(results);
-        log.info("retrieve_news results: {}", results.size());
+        log.info("检索完成FLOW|agent|node=retrieve_news|step=end|sessionId={}|resultCount={}|next=证据汇总/重排",
+                sessionId, results.size());
         return results;
     }
 

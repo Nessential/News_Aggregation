@@ -15,7 +15,7 @@ import java.util.Map;
 
 /**
  * FSM 上下文。
- * 用于状态迁移判断的关键输入。
+ * 用于状态迁移判断的关键信息。
  */
 @Data
 @Builder
@@ -49,6 +49,9 @@ public class FSMContext {
 
     /** 是否需要澄清 */
     private Boolean needsClarification;
+
+    /** 是否直接回答（无需检索） */
+    private Boolean directAnswer;
 
     /** 是否需要确认（写操作） */
     private Boolean requiresConfirmation;
