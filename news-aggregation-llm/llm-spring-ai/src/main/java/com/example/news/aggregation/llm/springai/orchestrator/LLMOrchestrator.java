@@ -87,7 +87,8 @@ public class LLMOrchestrator {
             GeneratorDraft draft = generatorService.generate(
                     userMessage,
                     routerResult.getTaskFamily(),
-                    rerankedResults
+                    rerankedResults,
+                    routerResult.getRetrievalMode()
             );
 
             // 6) 构建响应
@@ -120,6 +121,9 @@ public class LLMOrchestrator {
      */
     private List<RetrievalResult> retrieve(String query, RouterResult routerResult) {
         String retrievalMode = routerResult.getRetrievalMode();
+        if ("NONE".equalsIgnoreCase(retrievalMode)) {
+            return new ArrayList<>();
+        }
         if ("HYBRID".equalsIgnoreCase(retrievalMode)) {
             return retrieveTool.hybridRetrieve(query, 10);
         }

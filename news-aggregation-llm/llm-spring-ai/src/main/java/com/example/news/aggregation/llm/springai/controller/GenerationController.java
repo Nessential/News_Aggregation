@@ -31,6 +31,17 @@ public class GenerationController {
                 .user(prompt)
                 .call()
                 .content();
+        log.info("通用生成-模型原始输出(截断)={}", truncate(content, 500));
         return ResponseEntity.ok(GenerateResponse.builder().content(content).build());
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 }

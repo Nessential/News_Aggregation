@@ -25,10 +25,10 @@ public class SessionState implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** 会话ID */
+    /** 会话 ID */
     private String sessionId;
 
-    /** 用户ID */
+    /** 用户 ID */
     private String userId;
 
     /** 当前对话状态 */
@@ -38,11 +38,11 @@ public class SessionState implements Serializable {
     /** 用户约束条件 */
     private Constraints constraints;
 
-    /** 对话历史 (用户 query + Agent 回复) */
+    /** 对话历史（用户 query + Agent 回复） */
     @Builder.Default
     private List<String> history = new ArrayList<>();
 
-    /** 当前候选文章ID列表 */
+    /** 当前候选文档 ID 列表 */
     @Builder.Default
     private List<Long> currentCandidates = new ArrayList<>();
 
@@ -50,7 +50,7 @@ public class SessionState implements Serializable {
     @Builder.Default
     private List<RetrievalAttempt> attempts = new ArrayList<>();
 
-    /** 剩余预算 (限制 LLM 调用次数) */
+    /** 剩余预算（限制 LLM 调用次数） */
     @Builder.Default
     private Integer budget = 10;
 

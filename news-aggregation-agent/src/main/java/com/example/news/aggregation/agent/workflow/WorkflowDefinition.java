@@ -18,7 +18,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class WorkflowDefinition {
 
-    /** 工作流ID */
+    /** 工作流 ID */
     private String id;
 
     /** 工作流名称 */

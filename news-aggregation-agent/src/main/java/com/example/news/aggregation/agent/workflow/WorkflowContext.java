@@ -21,7 +21,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class WorkflowContext {
 
-    /** 会话ID */
+    /** 会话 ID */
     private String sessionId;
 
     /** 用户查询 */

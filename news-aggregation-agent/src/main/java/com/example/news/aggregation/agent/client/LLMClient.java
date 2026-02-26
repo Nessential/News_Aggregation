@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * LLM生成客户端（HTTP）
+ * LLM 生成客户端（HTTP）。
  */
 @Slf4j
 @Component
@@ -23,7 +23,7 @@ public class LLMClient {
     private String llmBaseUrl;
 
     /**
-     * 调用LLM生成接口
+     * 调用 LLM 生成接口。
      */
     public String generate(String prompt) {
         String url = llmBaseUrl + "/api/llm/generate";
@@ -31,9 +31,12 @@ public class LLMClient {
                 .prompt(prompt)
                 .build();
         try {
+            log.info("调用通用LLM生成FLOW|agent|client=llm|step=start|url={}|next=LLM服务", url);
             ResponseEntity<GenerateResponse> response = restTemplate.postForEntity(
                     url, request, GenerateResponse.class);
             GenerateResponse body = response.getBody();
+            int length = body != null && body.getContent() != null ? body.getContent().length() : 0;
+            log.info("通用LLM生成完成FLOW|agent|client=llm|step=end|answerLength={}|next=调用方处理", length);
             return body != null ? body.getContent() : "";
         } catch (Exception e) {
             log.warn("LLMClient generate failed, error={}", e.getMessage());

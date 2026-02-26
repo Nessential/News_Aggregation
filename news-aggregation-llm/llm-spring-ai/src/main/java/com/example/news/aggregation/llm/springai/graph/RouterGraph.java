@@ -20,8 +20,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * RouterGraph
- * 线性流程 + 条件分支：IntentAnalyze -> ReferenceResolve -> (SlotExtraction?) -> CompletenessCheck
+ * RouterGraph。
+ * 线性流程 + 条件分支：IntentAnalyze -> ReferenceResolve -> (SlotExtraction?) -> CompletenessCheck。
  */
 @Slf4j
 @Component
@@ -79,7 +79,7 @@ public class RouterGraph {
     }
 
     /**
-     * 执行图
+     * 执行图。
      *
      * @param state 初始状态
      * @return 最终状态
@@ -88,10 +88,21 @@ public class RouterGraph {
         Map<String, Object> initial = new HashMap<>();
         initial.put("routerState", state);
 
+        String sessionId = state != null && state.getSessionId() != null ? state.getSessionId() : "unknown";
+        // 流程日志：RouterGraph 开始
+        log.info("RouterGraph开始FLOW|router|graph=RouterGraph|step=start|sessionId={}|next=intent_analyze", sessionId);
+
         Optional<OverAllState> result = compiledGraph.invoke(initial);
         if (result.isPresent()) {
-            return readState(result.get());
+            RouterState finalState = readState(result.get());
+            log.info("RouterGraph结束FLOW|router|graph=RouterGraph|step=end|sessionId={}|taskFamily={}|retrievalMode={}|needsClarification={}",
+                    sessionId,
+                    finalState.getTaskFamily(),
+                    finalState.getRetrievalMode(),
+                    finalState.getNeedsClarification());
+            return finalState;
         }
+        log.warn("RouterGraph结束-无结果FLOW|router|graph=RouterGraph|step=end|sessionId={}|result=empty", sessionId);
         return state;
     }
 
@@ -106,9 +117,9 @@ public class RouterGraph {
     }
 
     /**
-     * 判断是否需要槽位提取
+     * 判断是否需要槽位提取。
      *
-     * @param state Router状态
+     * @param state Router 状态
      * @return true=执行槽位提取
      */
     private boolean shouldExtractSlots(RouterState state) {
@@ -116,6 +127,12 @@ public class RouterGraph {
             return false;
         }
         String resolvedQuery = state.getResolvedQuery();
-        return resolvedQuery != null && !resolvedQuery.isBlank();
+        boolean shouldExtract = resolvedQuery != null && !resolvedQuery.isBlank();
+        String sessionId = state.getSessionId() != null ? state.getSessionId() : "unknown";
+        String nextNode = shouldExtract ? "slot_extract" : "completeness_check";
+        String reason = shouldExtract ? "resolvedQuery 非空" : "resolvedQuery 为空";
+        log.info("节点跳转判定FLOW|router|from=reference_resolve|to={}|reason={}|sessionId={}|shouldExtract={}|resolvedQueryBlank={}",
+                nextNode, reason, sessionId, shouldExtract, resolvedQuery == null || resolvedQuery.isBlank());
+        return shouldExtract;
     }
 }

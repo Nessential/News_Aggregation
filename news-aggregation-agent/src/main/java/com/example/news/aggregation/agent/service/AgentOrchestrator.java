@@ -15,7 +15,7 @@ public class AgentOrchestrator {
     private final LLMOrchestrator llmOrchestrator;
 
     /**
-     * 处理聊天请求。
+     * 处理聊天请求（兼容入口）。
      */
     public AgentResponse handleChat(ChatRequest request) {
         return llmOrchestrator.handleChat(request);

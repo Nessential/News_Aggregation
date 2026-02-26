@@ -22,7 +22,7 @@ public class PlanWorkflowAdapter {
     /**
      * 转换 Plan 为 WorkflowDefinition。
      *
-     * @param plan 计划
+     * @param plan        计划
      * @param typeToolMap 任务类型到工具列表映射
      * @return 工作流定义
      */

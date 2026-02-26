@@ -18,13 +18,13 @@ import java.util.Map;
 @AllArgsConstructor
 public class WorkflowStep {
 
-    /** 步骤ID */
+    /** 步骤 ID */
     private String stepId;
 
     /** 能力名称 */
     private String capabilityName;
 
-    /** 依赖的步骤ID列表 */
+    /** 依赖的步骤 ID 列表 */
     private List<String> dependsOn;
 
     /** 步骤参数 */

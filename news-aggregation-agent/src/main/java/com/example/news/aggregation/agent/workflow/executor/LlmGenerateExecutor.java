@@ -47,9 +47,25 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         String taskFamily = parameters != null && parameters.get("taskFamily") != null
                 ? String.valueOf(parameters.get("taskFamily"))
                 : context.getTaskFamily();
+        String retrievalMode = parameters != null && parameters.get("retrievalMode") != null
+                ? String.valueOf(parameters.get("retrievalMode"))
+                : null;
+        if (retrievalMode == null && context != null && context.getAttributes() != null) {
+            Object modeFromContext = context.getAttributes().get("retrievalMode");
+            if (modeFromContext != null) {
+                retrievalMode = String.valueOf(modeFromContext);
+            }
+        }
+        boolean allowNoEvidence = "NONE".equalsIgnoreCase(retrievalMode);
 
         List<RetrievalResult> evidence = convertEvidence(context.getEvidence());
-        GeneratorDraft draft = generatorClient.generate(context.getQuery(), taskFamily, evidence);
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        int evidenceCount = evidence != null ? evidence.size() : 0;
+        String reason = allowNoEvidence ? "无需证据直答" : "证据齐备";
+        log.info("开始生成FLOW|agent|node=llm_generate|step=start|sessionId={}|taskFamily={}|evidenceCount={}|retrievalMode={}|reason={}|next=LLM生成",
+                sessionId, taskFamily, evidenceCount, retrievalMode, reason);
+
+        GeneratorDraft draft = generatorClient.generate(context.getQuery(), taskFamily, evidence, retrievalMode);
         if (draft == null || draft.getAnswer() == null || draft.getAnswer().isBlank()) {
             String fallback = "生成失败或证据不足。";
             context.putAttribute("answer", fallback);
@@ -59,7 +75,8 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
 
         context.putAttribute("answer", draft.getAnswer());
         context.putAttribute("citations", draft.getCitations());
-        log.info("llm_generate completed, answer length={}", draft.getAnswer().length());
+        log.info("生成完成FLOW|agent|node=llm_generate|step=end|sessionId={}|answerLength={}|next=响应组装",
+                sessionId, draft.getAnswer().length());
         return draft.getAnswer();
     }
 

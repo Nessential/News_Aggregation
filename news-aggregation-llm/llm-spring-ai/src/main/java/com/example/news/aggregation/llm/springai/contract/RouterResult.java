@@ -20,7 +20,7 @@ public class RouterResult {
     /** 任务类型：QA、SUMMARY、COMPARE、TIMELINE、DEEP_DIVE */
     private String taskFamily;
 
-    /** 检索模式：SEMANTIC、KEYWORD、HYBRID、GRAPH */
+    /** 检索模式：SEMANTIC、KEYWORD、HYBRID、NONE */
     private String retrievalMode;
 
     /** 风险级别：LOW、MEDIUM、HIGH */

@@ -18,30 +18,30 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PipelineContext {
-    /** 会话状态。 */
+    /** 会话状态 */
     private SessionState sessionState;
 
-    /** Router 分析结果。 */
+    /** Router 分析结果 */
     private RouterResult routerResult;
 
-    /** 用户原始 query。 */
+    /** 用户原始 query */
     private String query;
 
-    /** 证据文档 (文章ID -> 文章内容)。 */
+    /** 证据文档（文章 ID -> 文章内容） */
     private Map<Long, String> evidence;
 
-    /** 检索到的候选文档 ID。 */
+    /** 检索到的候选文档 ID */
     private List<Long> candidateIds;
 
-    /** 额外参数 (扩展字段)。 */
+    /** 额外参数（扩展字段） */
     private Map<String, Object> extraParams;
 
-    /** 获取用户约束。 */
+    /** 获取用户约束 */
     public Constraints getConstraints() {
         return sessionState != null ? sessionState.getConstraints() : null;
     }
 
-    /** 获取对话历史。 */
+    /** 获取对话历史 */
     public List<String> getHistory() {
         return sessionState != null ? sessionState.getHistory() : null;
     }

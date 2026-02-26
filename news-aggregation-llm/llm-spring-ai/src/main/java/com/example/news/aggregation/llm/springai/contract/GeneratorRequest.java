@@ -24,6 +24,9 @@ public class GeneratorRequest {
     /** 任务类型 */
     private String taskFamily;
 
+    /** 检索模式：SEMANTIC、KEYWORD、HYBRID、NONE */
+    private String retrievalMode;
+
     /** 证据列表 */
     private List<RetrievalResult> evidence;
 }

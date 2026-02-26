@@ -55,7 +55,7 @@ public class WorkflowBootstrap {
     private WorkflowDefinition buildSummaryWorkflow() {
         return WorkflowDefinition.builder()
                 .id("SUMMARY_WORKFLOW")
-                .name("新闻概括工作流")
+                .name("新闻摘要工作流")
                 .steps(List.of(
                         WorkflowStep.builder()
                                 .stepId("summary-retrieve")

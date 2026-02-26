@@ -2,7 +2,7 @@
 news:
   rss:
     sources:
-      - name: BBC Business
+      - name: BBC
         url: https://feeds.bbci.co.uk/news/business/rss.xml
         category: Business
 

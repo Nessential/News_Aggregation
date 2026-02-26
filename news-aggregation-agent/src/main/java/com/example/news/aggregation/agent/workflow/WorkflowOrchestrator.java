@@ -42,6 +42,10 @@ public class WorkflowOrchestrator {
             log.warn("Plan is empty, skip execution.");
             return context;
         }
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        int taskCount = plan.getTasks() != null ? plan.getTasks().size() : 0;
+        log.info("执行计划FLOW|agent|workflow=plan|step=start|sessionId={}|taskCount={}|next=转为WorkflowDefinition",
+                sessionId, taskCount);
         WorkflowDefinition workflow = planWorkflowAdapter.toWorkflowDefinition(plan, TYPE_TOOL_MAP);
         return executeWorkflow(workflow, context);
     }
@@ -57,6 +61,9 @@ public class WorkflowOrchestrator {
         List<WorkflowStep> steps = workflow.getSteps();
         boolean hasDependencies = steps.stream().anyMatch(step ->
                 step != null && step.getDependsOn() != null && !step.getDependsOn().isEmpty());
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("执行工作流FLOW|agent|workflow=explicit|step=start|sessionId={}|stepCount={}|hasDependencies={}|next=执行能力节点",
+                sessionId, steps.size(), hasDependencies);
 
         if (!hasDependencies) {
             // 无依赖时按顺序执行
@@ -73,13 +80,16 @@ public class WorkflowOrchestrator {
     }
 
     /**
-     * 执行指定工作流ID。
+     * 执行指定工作流 ID。
      */
     public WorkflowContext executeWorkflow(String workflowId, WorkflowContext context) {
         if (workflowId == null || workflowId.isBlank()) {
             log.warn("workflowId is blank, skip execution.");
             return context;
         }
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("指定工作流FLOW|agent|workflow=explicit|step=lookup|sessionId={}|workflowId={}|next=执行工作流",
+                sessionId, workflowId);
         WorkflowDefinition workflow = workflowRegistry.getWorkflow(workflowId);
         return executeWorkflow(workflow, context);
     }
@@ -210,6 +220,9 @@ public class WorkflowOrchestrator {
         try {
             executeCapability(step.getCapabilityName(), step.getParameters(), context);
             completed.add(step.getStepId());
+            String sessionId = context != null ? context.getSessionId() : "unknown";
+            log.info("步骤完成FLOW|agent|workflow=step|stepId={}|capability={}|sessionId={}|next=依赖判断/下一步",
+                    step.getStepId(), step.getCapabilityName(), sessionId);
         } catch (Exception e) {
             failed.add(step.getStepId());
             context.putAttribute("workflow.error", e.getMessage());
@@ -243,6 +256,9 @@ public class WorkflowOrchestrator {
         if (capabilityName == null || capabilityName.isBlank()) {
             return;
         }
+        String sessionId = context != null ? context.getSessionId() : "unknown";
+        log.info("执行能力FLOW|agent|workflow=capability|step=start|sessionId={}|capability={}|next=对应执行器",
+                sessionId, capabilityName);
         CapabilityExecutor executor = workflowRegistry.getExecutor(capabilityName);
         if (executor == null) {
             log.warn("Capability not found: {}", capabilityName);
