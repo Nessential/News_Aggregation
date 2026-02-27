@@ -193,16 +193,16 @@ public class ElasticsearchServiceImpl implements ElasticsearchService {
                 if (value instanceof Map<?, ?> rangeMap) {
                     Object gte = rangeMap.get("gte");
                     Object lte = rangeMap.get("lte");
-                    boolBuilder.filter(f -> f.range(r -> {
-                        r.field(key);
+                    boolBuilder.filter(f -> f.range(r -> r.untyped(u -> {
+                        u.field(key);
                         if (gte != null) {
-                            r.gte(JsonData.of(gte));
+                            u.gte(JsonData.of(gte));
                         }
                         if (lte != null) {
-                            r.lte(JsonData.of(lte));
+                            u.lte(JsonData.of(lte));
                         }
-                        return r;
-                    }));
+                        return u;
+                    })));
                 } else {
                     boolBuilder.filter(f -> f.term(t -> t
                             .field(key)

@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 /**
- * LLM 鐢熸垚瀹㈡埛绔紙HTTP锛夈€? */
+ * LLM 生成客户端(HTTP)。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -22,7 +23,8 @@ public class LLMClient {
     private String llmBaseUrl;
 
     /**
-     * 璋冪敤 LLM 鐢熸垚鎺ュ彛銆?     */
+     * 调用 LLM 生成接口。
+     */
     public String generate(String prompt) {
         String url = llmBaseUrl + "/api/llm/generate";
         GenerateRequest request = GenerateRequest.builder()
@@ -42,4 +44,3 @@ public class LLMClient {
         }
     }
 }
-

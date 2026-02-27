@@ -15,10 +15,8 @@ import org.springframework.web.client.RestTemplate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
-/**
- * 检索服务客户端(HTTP)。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -29,38 +27,26 @@ public class RetrievalClient {
     @Value("${app.news.retrieval.base-url:http://localhost:8082}")
     private String retrievalBaseUrl;
 
-    /**
-     * 鍏抽敭璇嶆绱紙ES锛夈€?     */
     public List<RetrievalResult> keywordSearch(String query, int topK) {
         return post("/api/news/retrieval/keyword", query, topK, null, null);
     }
 
-    /**
-     * 鍏抽敭璇嶆绱紙ES锛夈€?     */
     public List<RetrievalResult> keywordSearch(String query, int topK, Map<String, Object> filters) {
         return post("/api/news/retrieval/keyword", query, topK, null, filters);
     }
 
-    /**
-     * 鍚戦噺妫€绱紙Qdrant锛夈€?     */
     public List<RetrievalResult> vectorSearch(String query, int topK, double minScore) {
         return post("/api/news/retrieval/vector", query, topK, minScore, null);
     }
 
-    /**
-     * 鍚戦噺妫€绱紙Qdrant锛夈€?     */
     public List<RetrievalResult> vectorSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/vector", query, topK, minScore, filters);
     }
 
-    /**
-     * 娣峰悎妫€绱紙鍚戦噺 + 鍏抽敭璇?+ RRF + 鍘婚噸锛夈€?     */
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, null);
     }
 
-    /**
-     * 娣峰悎妫€绱紙鍚戦噺 + 鍏抽敭璇?+ RRF + 鍘婚噸锛夈€?     */
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, filters);
     }
@@ -74,17 +60,18 @@ public class RetrievalClient {
                 .filters(filters)
                 .build();
         try {
-            log.info("[client] 调用检索服务FLOW|agent|client=retrieval|step=start|url={}|topK={}|minScore={}|next=检索服务", url, topK, minScore);
+            log.info("[client] call retrieval|client=retrieval|step=start|url={} |query={} |topK={} |minScore={} |filters={} |next=news-retrieval",
+                    url, querySummary(query), topK, minScore, summarizeFilters(filters));
             ResponseEntity<RetrievalResponse> response = restTemplate.postForEntity(
                     url, request, RetrievalResponse.class);
             RetrievalResponse body = response.getBody();
             if (body == null || body.getResults() == null) {
-                log.info("[client] 检索返回空FLOW|agent|client=retrieval|step=end|url={}|resultCount=0|next=证据汇总", url);
+                log.info("[client] retrieval empty|client=retrieval|step=end|url={} |resultCount=0|next=evidence-merge", url);
                 return new ArrayList<>();
             }
             List<RetrievalResult> results = new ArrayList<>();
             for (RetrievalResultDto item : body.getResults()) {
-                if (item == null || item.getArticleId() == null) {
+                if (item == null) {
                     continue;
                 }
                 results.add(RetrievalResult.builder()
@@ -94,7 +81,7 @@ public class RetrievalClient {
                         .metadata(item.getMetadata())
                         .build());
             }
-            log.info("[client] 检索完成FLOW|agent|client=retrieval|step=end|url={}|resultCount={}|next=证据汇总", url, results.size());
+            log.info("[client] retrieval done|client=retrieval|step=end|url={} |resultCount={} |next=evidence-merge", url, results.size());
 
             return results;
         } catch (Exception e) {
@@ -102,41 +89,56 @@ public class RetrievalClient {
             return new ArrayList<>();
         }
     }
+
+    private String summarizeFilters(Map<String, Object> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return "{}";
+        }
+        return filters.toString();
+    }
+
+    private String querySummary(String query) {
+        if (query == null) {
+            return "null";
+        }
+        String compact = Pattern.compile("\\s+").matcher(query).replaceAll(" ").trim();
+        return "len=" + compact.length() + ",value=" + truncate(compact, 120);
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     private static class RetrievalRequest {
-        // 用户查询文本
         private String query;
-        // 结果数量上限
         private Integer topK;
-        // 向量检索最小得分阈值(可选)
         private Double minScore;
-        // 过滤条件(可选)
         private Map<String, Object> filters;
     }
+
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     private static class RetrievalResponse {
-        // 检索结果列表
         private List<RetrievalResultDto> results;
     }
+
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     private static class RetrievalResultDto {
-        // 文章主键(news_id 或 ES 文档 id)
         private Long articleId;
-        // 相关性得分
         private Double score;
-        // 证据片段(摘要)
         private String snippet;
-        // 原始元数据(序列化后的 source/payload)
         private String metadata;
     }
 }
-

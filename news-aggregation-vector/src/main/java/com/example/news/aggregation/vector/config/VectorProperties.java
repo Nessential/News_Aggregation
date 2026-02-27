@@ -32,7 +32,17 @@ public class VectorProperties {
     /**
      * 默认集合名称
      */
-    private String collectionName = "news_vectors";
+    private String collectionName = "news_chunks_zh";
+
+    /**
+     * 中文向量集合名称
+     */
+    private String collectionNameZh = "news_chunks_zh";
+
+    /**
+     * 英文向量集合名称
+     */
+    private String collectionNameEn = "news_chunks_en";
     
     /**
      * 向量维度大小

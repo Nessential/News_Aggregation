@@ -125,6 +125,7 @@ public class IntentAnalyzeNode {
             String retrievalMode = root.path("retrievalMode").asText("").trim();
             double confidence = root.path("confidence").asDouble(0.0);
             String reason = root.path("reason").asText("");
+            String language = root.path("language").asText("").trim();
 
             if (intentScope.isBlank()) {
                 setDefaultNewsRoute(state, "missing_intent_scope");
@@ -138,6 +139,9 @@ public class IntentAnalyzeNode {
             state.setRetrievalMode(normalizedMode);
             state.setIntentConfidence(confidence);
             state.setIntentReason(reason);
+            if (!language.isBlank()) {
+                ensureParams(state).put("language", language.toLowerCase(Locale.ROOT));
+            }
 
             if ("NON_NEWS".equalsIgnoreCase(intentScope)) {
                 state.setTaskFamily("QA");
@@ -157,6 +161,13 @@ public class IntentAnalyzeNode {
         state.setTaskFamily("QA");
         state.setRiskLevel("LOW");
         state.setNeedsClarification(false);
+    }
+
+    private java.util.Map<String, Object> ensureParams(RouterState state) {
+        if (state.getParams() == null) {
+            state.setParams(new java.util.HashMap<>());
+        }
+        return state.getParams();
     }
 
     private String extractJson(String raw) {

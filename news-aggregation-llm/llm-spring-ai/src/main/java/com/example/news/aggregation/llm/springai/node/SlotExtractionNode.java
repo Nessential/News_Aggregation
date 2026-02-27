@@ -118,6 +118,7 @@ public class SlotExtractionNode {
             String language = root.path("language").asText(null);
             double confidence = root.path("confidence").asDouble(0.0);
             String reason = root.path("reason").asText("");
+            java.util.List<String> keywords = parseKeywords(root.path("keywords"));
 
             if (taskFamily == null || taskFamily.isBlank()) {
                 taskFamily = "QA";
@@ -136,6 +137,7 @@ public class SlotExtractionNode {
             putIfNotBlank(params, "source", source);
             putIfNotBlank(params, "publisher", publisher);
             putIfNotBlank(params, "language", language);
+            putIfNotEmpty(params, "keywords", keywords);
 
             state.setParams(params);
             return true;
@@ -157,6 +159,42 @@ public class SlotExtractionNode {
         if (value != null && !value.isBlank()) {
             params.put(key, value);
         }
+    }
+
+    private void putIfNotEmpty(Map<String, Object> params, String key, java.util.List<String> values) {
+        if (values != null && !values.isEmpty()) {
+            params.put(key, values);
+        }
+    }
+
+    private java.util.List<String> parseKeywords(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return java.util.List.of();
+        }
+        if (node.isArray()) {
+            java.util.List<String> result = new java.util.ArrayList<>();
+            node.forEach(item -> {
+                if (item != null && !item.isNull()) {
+                    String text = item.asText("").trim();
+                    if (!text.isBlank() && !result.contains(text)) {
+                        result.add(text);
+                    }
+                }
+            });
+            return result;
+        }
+        String text = node.asText("").trim();
+        if (text.isBlank()) {
+            return java.util.List.of();
+        }
+        String[] parts = text.split("\\s*,\\s*|\\s+");
+        java.util.List<String> result = new java.util.ArrayList<>();
+        for (String part : parts) {
+            if (part != null && !part.isBlank() && !result.contains(part)) {
+                result.add(part);
+            }
+        }
+        return result;
     }
 
     private String extractJson(String raw) {

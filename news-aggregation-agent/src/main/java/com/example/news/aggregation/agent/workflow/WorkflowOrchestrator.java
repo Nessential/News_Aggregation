@@ -11,7 +11,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 宸ヤ綔娴佺紪鎺掑櫒銆? * 鍩轰簬 Plan 鎴栨樉寮忓伐浣滄祦鎵ц鑳藉姏閾捐矾銆? */
+ * 工作流编排器：执行显式 Workflow 或 Planner 输出的 Plan。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -20,7 +21,7 @@ public class WorkflowOrchestrator {
     private final WorkflowRegistry workflowRegistry;
     private final PlanWorkflowAdapter planWorkflowAdapter;
 
-    /** 浠诲姟绫诲瀷鍒伴粯璁よ兘鍔涘垪琛ㄧ殑鏄犲皠 */
+    /** 任务类型到默认能力列表的映射。 */
     private static final Map<String, List<String>> TYPE_TOOL_MAP = Map.of(
             "SEARCH", List.of("search_news"),
             "RETRIEVE", List.of("retrieve_news"),
@@ -32,8 +33,6 @@ public class WorkflowOrchestrator {
             "DEEP_DIVE", List.of("llm_generate")
     );
 
-    /**
-     * 鎵ц Plan銆?     */
     public WorkflowContext executePlan(Plan plan, WorkflowContext context) {
         if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
             log.warn("Plan is empty, skip execution.");
@@ -41,14 +40,14 @@ public class WorkflowOrchestrator {
         }
         String sessionId = context != null ? context.getSessionId() : "unknown";
         int taskCount = plan.getTasks() != null ? plan.getTasks().size() : 0;
-        log.info("[workflow] 鎵ц璁″垝FLOW|agent|workflow=plan|step=start|sessionId={}|taskCount={}|next=杞负WorkflowDefinition",
+        log.info("[workflow] 执行计划FLOW|agent|workflow=plan|step=start|sessionId={}|taskCount={}|next=转换为WorkflowDefinition",
                 sessionId, taskCount);
+
+        // 调用点注释：将 Planner 的任务列表转换成可执行 Workflow。
         WorkflowDefinition workflow = planWorkflowAdapter.toWorkflowDefinition(plan, TYPE_TOOL_MAP);
         return executeWorkflow(workflow, context);
     }
 
-    /**
-     * 鎵ц鏄惧紡宸ヤ綔娴佸畾涔夈€?     */
     public WorkflowContext executeWorkflow(WorkflowDefinition workflow, WorkflowContext context) {
         if (workflow == null || workflow.getSteps() == null || workflow.getSteps().isEmpty()) {
             log.warn("Workflow is empty, skip execution.");
@@ -58,15 +57,16 @@ public class WorkflowOrchestrator {
         boolean hasDependencies = steps.stream().anyMatch(step ->
                 step != null && step.getDependsOn() != null && !step.getDependsOn().isEmpty());
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("鎵ц宸ヤ綔娴丗LOW|agent|workflow=explicit|step=start|sessionId={}|stepCount={}|hasDependencies={}|next=鎵ц鑳藉姏鑺傜偣",
+        log.info("[workflow] 执行工作流FLOW|agent|workflow=explicit|step=start|sessionId={}|stepCount={}|hasDependencies={}|next=执行能力节点",
                 sessionId, steps.size(), hasDependencies);
 
         if (!hasDependencies) {
-            // 鏃犱緷璧栨椂鎸夐『搴忔墽琛?
+            // 无依赖时按顺序执行。
             for (WorkflowStep step : steps) {
                 if (step == null) {
                     continue;
                 }
+                // 调用点注释：这里会按 capabilityName 分发；retrieve_news 将进入 RetrieveNewsExecutor。
                 executeCapability(step.getCapabilityName(), step.getParameters(), context);
             }
             return context;
@@ -75,27 +75,24 @@ public class WorkflowOrchestrator {
         return executeWithDependencies(workflow, context);
     }
 
-    /**
-     * 鎵ц鎸囧畾宸ヤ綔娴?ID銆?     */
     public WorkflowContext executeWorkflow(String workflowId, WorkflowContext context) {
         if (workflowId == null || workflowId.isBlank()) {
             log.warn("workflowId is blank, skip execution.");
             return context;
         }
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 指定工作流FLOW|agent|workflow=explicit|step=lookup|sessionId={}|workflowId={}|next=执行工作流", sessionId, workflowId);
+        log.info("[workflow] 指定工作流FLOW|agent|workflow=explicit|step=lookup|sessionId={}|workflowId={}|next=执行工作流",
+                sessionId, workflowId);
+
+        // 调用点注释：从注册表读取内置工作流定义（如 QA_WORKFLOW）。
         WorkflowDefinition workflow = workflowRegistry.getWorkflow(workflowId);
         return executeWorkflow(workflow, context);
     }
 
-    /**
-     * 鍒ゆ柇宸ヤ綔娴佹槸鍚﹀瓨鍦ㄣ€?     */
     public boolean hasWorkflow(String workflowId) {
         return workflowRegistry.containsWorkflow(workflowId);
     }
 
-    /**
-     * 鍩轰簬渚濊禆鍏崇郴鎵ц宸ヤ綔娴併€?     */
     private WorkflowContext executeWithDependencies(WorkflowDefinition workflow, WorkflowContext context) {
         List<WorkflowStep> steps = workflow.getSteps();
         Map<String, WorkflowStep> stepMap = new HashMap<>();
@@ -213,7 +210,7 @@ public class WorkflowOrchestrator {
             executeCapability(step.getCapabilityName(), step.getParameters(), context);
             completed.add(step.getStepId());
             String sessionId = context != null ? context.getSessionId() : "unknown";
-            log.info("[workflow] 姝ラ瀹屾垚FLOW|agent|workflow=step|stepId={}|capability={}|sessionId={}|next=渚濊禆鍒ゆ柇/涓嬩竴姝?",
+            log.info("[workflow] 步骤完成FLOW|agent|workflow=step|stepId={}|capability={}|sessionId={}|next=依赖判断/下一步",
                     step.getStepId(), step.getCapabilityName(), sessionId);
         } catch (Exception e) {
             failed.add(step.getStepId());
@@ -241,21 +238,22 @@ public class WorkflowOrchestrator {
         return value instanceof Boolean && (Boolean) value;
     }
 
-    /**
-     * 鎵ц鑳藉姏鑺傜偣銆?     */
     private void executeCapability(String capabilityName, Map<String, Object> parameters, WorkflowContext context) {
         if (capabilityName == null || capabilityName.isBlank()) {
             return;
         }
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 鎵ц鑳藉姏FLOW|agent|workflow=capability|step=start|sessionId={}|capability={}|next=瀵瑰簲鎵ц鍣?",
+        log.info("[workflow] 执行能力FLOW|agent|workflow=capability|step=start|sessionId={}|capability={}|next=对应执行器",
                 sessionId, capabilityName);
+
+        // 调用点注释：按 capabilityName 解析执行器，retrieve_news 会映射到 RetrieveNewsExecutor。
         CapabilityExecutor executor = workflowRegistry.getExecutor(capabilityName);
         if (executor == null) {
             log.warn("Capability not found: {}", capabilityName);
             return;
         }
+
+        // 调用点注释：真正执行节点逻辑；retrieve_news 在这里调用检索客户端。
         executor.execute(parameters, context);
     }
 }
-

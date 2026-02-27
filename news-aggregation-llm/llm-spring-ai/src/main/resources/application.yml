@@ -46,7 +46,7 @@ app:
 
     # Qdrant向量数据库配置
     qdrant:
-      collection-name: ${QDRANT_COLLECTION:news_vectors}
+      collection-name: ${QDRANT_COLLECTION:news_chunks_zh}
 
     # Elasticsearch配置
     elasticsearch:

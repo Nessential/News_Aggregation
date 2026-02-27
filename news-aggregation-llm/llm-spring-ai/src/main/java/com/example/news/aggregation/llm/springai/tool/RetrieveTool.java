@@ -39,7 +39,7 @@ public class RetrieveTool {
     @Value("${app.llm.mcp.tool.retrieval.min-similarity:0.5}")
     private double minSimilarity;
 
-    @Value("${app.llm.qdrant.collection-name:news_vectors}")
+    @Value("${app.llm.qdrant.collection-name:news_chunks_zh}")
     private String collectionName;
 
     @Value("${app.llm.mock-mode:false}")
