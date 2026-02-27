@@ -13,7 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 閲嶆帓搴忚兘鍔涖€? */
+ * 重排序能力。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -31,7 +32,7 @@ public class RerankExecutor implements CapabilityExecutor {
         return CapabilityMetadata.builder()
                 .name("rerank_results")
                 .version("v1")
-                .description("鍩轰簬 MMR 鐨勭粨鏋滈噸鎺?")
+                .description("基于 MMR 的结果重排")
                 .timeoutMs(2000L)
                 .costLevel("LOW")
                 .permissionScope("PUBLIC")
@@ -47,14 +48,14 @@ public class RerankExecutor implements CapabilityExecutor {
                 ? ((Number) parameters.get("lambda")).doubleValue()
                 : 0.7;
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("寮€濮嬮噸鎺扚LOW|agent|node=rerank_results|step=start|sessionId={}|topK={}|lambda={}|reason=鎻愬崌澶氭牱鎬т笌鐩稿叧鎬next=閲嶆帓绠楁硶",
+        log.info("开始重排FLOW|agent|node=rerank_results|step=start|sessionId={}|topK={}|lambda={}|reason=提升多样性与相关性|next=重排算法",
                 sessionId, topK, lambda);
 
         List<RetrievalResult> results = rerankTool.mmrRerank(context.getEvidence(), topK, lambda);
         context.setEvidence(results);
-        log.info("[链路最终] 重排完成FLOW|agent|node=rerank_results|step=end|sessionId={}|resultCount={}|next=生成", sessionId, results.size());
+        log.info("[链路最终] 重排完成FLOW|agent|node=rerank_results|step=end|sessionId={}|resultCount={}|next=生成",
+                sessionId, results.size());
 
         return results;
     }
 }
-

@@ -48,7 +48,7 @@ news:
       port: 6334
       use-tls: false
       # 默认集合（向后兼容）
-      collection-name: news_vectors
+      collection-name: news_chunks_zh
       vector-size: 2048
       api-key: ${QDRANT_API_KEY:}
       # 多集合配置

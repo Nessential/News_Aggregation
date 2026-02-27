@@ -56,6 +56,17 @@ public class DraftGenerateNode {
             log.info("生成-模型原始输出(截断)={}", truncate(raw, 500));
 
             GeneratorDraft draft = parseJsonDraft(raw, allowNoEvidence);
+            int answerLength = draft != null && draft.getAnswer() != null ? draft.getAnswer().length() : 0;
+            int citationCount = draft != null && draft.getCitations() != null ? draft.getCitations().size() : 0;
+            String citationIds = draft != null && draft.getCitations() != null
+                    ? draft.getCitations().stream()
+                    .map(GeneratorDraft.Citation::getSourceId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .limit(5)
+                    .collect(Collectors.joining(","))
+                    : "";
+            log.info("生成草稿解析完成|answerLength={} |citationCount={} |citationIds={}",
+                    answerLength, citationCount, citationIds);
 
             state.setDraft(draft);
         } catch (Exception e) {
@@ -163,7 +174,7 @@ public class DraftGenerateNode {
         for (JsonNode item : citationsNode) {
             String sourceId = null;
             String text = null;
-            if (item.isTextual()) {
+            if (item.isTextual() || item.isNumber()) {
                 sourceId = item.asText();
             } else if (item.isObject()) {
                 sourceId = item.path("sourceId").asText("");
@@ -172,6 +183,7 @@ public class DraftGenerateNode {
                 }
                 text = item.path("text").asText(null);
             }
+            sourceId = normalizeSourceId(sourceId);
             if (sourceId == null || sourceId.isBlank()) {
                 continue;
             }
@@ -195,5 +207,16 @@ public class DraftGenerateNode {
             return trimmed.substring(start, end + 1);
         }
         return null;
+    }
+
+    private String normalizeSourceId(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.startsWith("[") && value.endsWith("]") && value.length() > 2) {
+            value = value.substring(1, value.length() - 1).trim();
+        }
+        return value;
     }
 }

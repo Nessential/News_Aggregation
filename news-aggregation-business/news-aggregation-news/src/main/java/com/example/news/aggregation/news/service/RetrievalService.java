@@ -18,6 +18,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -54,14 +55,41 @@ public class RetrievalService {
         String finalQuery = buildQuery(query, criteria);
         Map<String, Object> esFilters = buildEsFilters(criteria);
         String sortBy = criteria.getSortBy();
+        log.info("[DIAG][retrieval][keyword] start|query={} |finalQuery={} |topK={} |filters={} |sortBy={}",
+                querySummary(query), querySummary(finalQuery), size, summarizeFilters(esFilters), sortBy);
 
         List<String> fields = List.of("title", "summary", "context", "title_cn", "summary_cn", "context_cn");
-        List<Map<String, Object>> esResults = elasticsearchService.search(
-                esProperties.getIndexName(), finalQuery, size, fields, esFilters, sortBy);
-        return esResults.stream()
-                .map(this::mapEsResult)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        Map<String, Object> activeFilters = new HashMap<>(esFilters);
+        List<Map<String, Object>> esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
+        List<RetrievalResultDto> mappedResults = mapEsResults(esResults);
+        // Fallback-1: language filter is often over-strict when source language is persisted as 'en'.
+        if (mappedResults.isEmpty() && activeFilters.containsKey("language")) {
+            Object removed = activeFilters.remove("language");
+            log.info("[DIAG][retrieval][keyword] fallback|reason=empty-with-language-filter|removedLanguage={} |retryFilters={}",
+                    removed, summarizeFilters(activeFilters));
+            esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
+            mappedResults = mapEsResults(esResults);
+        }
+        // Fallback-2: time window may be too narrow for current data.
+        if (mappedResults.isEmpty() && activeFilters.containsKey("publication_time")) {
+            Object removed = activeFilters.remove("publication_time");
+            log.info("[DIAG][retrieval][keyword] fallback|reason=empty-with-time-range|removedPublicationTime={} |retryFilters={}",
+                    removed, summarizeFilters(activeFilters));
+            esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
+            mappedResults = mapEsResults(esResults);
+        }
+        // Fallback-3: clear all remaining filters for robust recall.
+        if (mappedResults.isEmpty() && !activeFilters.isEmpty()) {
+            Map<String, Object> removed = new HashMap<>(activeFilters);
+            activeFilters.clear();
+            log.info("[DIAG][retrieval][keyword] fallback|reason=empty-with-all-filters|removedFilters={} |retryFilters={}",
+                    summarizeFilters(removed), summarizeFilters(activeFilters));
+            esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
+            mappedResults = mapEsResults(esResults);
+        }
+        log.info("[DIAG][retrieval][keyword] end|index={} |esRawCount={} |mappedCount={}",
+                esProperties.getIndexName(), esResults.size(), mappedResults.size());
+        return mappedResults;
     }
 
     /**
@@ -77,15 +105,44 @@ public class RetrievalService {
     public List<RetrievalResultDto> vectorSearch(String query, Integer topK, Double minScore, Map<String, Object> filters) {
         int size = normalizeTopK(topK);
         double min = normalizeMinScore(minScore);
+        FilterCriteria criteria = parseFilters(filters);
+        String collectionName = resolveCollectionName(criteria);
         float[] queryVector = embeddingService.embed(query);
-        Map<String, Object> vectorFilters = buildVectorFilters(parseFilters(filters));
-        List<SearchResult> results = vectorStoreService.search(
-                vectorProperties.getCollectionName(), queryVector, size, vectorFilters);
-        return results.stream()
-                .filter(r -> r.getScore() >= min)
-                .map(this::mapVectorResult)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        Map<String, Object> vectorFilters = buildVectorFilters(criteria);
+        log.info("[DIAG][retrieval][vector] start|query={} |topK={} |minScore={} |collection={} |language={} |filters={} |vectorDim={}",
+                querySummary(query), size, min, collectionName, criteria.getLanguage(), summarizeFilters(vectorFilters), queryVector.length);
+        List<SearchResult> rawResults = vectorStoreService.search(
+                collectionName, queryVector, size, vectorFilters);
+        VectorEvaluation evaluation = evaluateVectorResults(rawResults, min);
+        int belowScoreCount = evaluation.getBelowScoreCount();
+        int invalidIdCount = evaluation.getInvalidIdCount();
+        List<String> invalidIdSamples = evaluation.getInvalidIdSamples();
+        List<RetrievalResultDto> mappedResults = evaluation.getMappedResults();
+        if (mappedResults.isEmpty() && vectorFilters.containsKey("published_at")) {
+            Map<String, Object> relaxed = new HashMap<>(vectorFilters);
+            Object removed = relaxed.remove("published_at");
+            log.info("[DIAG][retrieval][vector] fallback|reason=empty-with-time-range|removedPublishedAt={} |retryFilters={}",
+                    removed, summarizeFilters(relaxed));
+            rawResults = vectorStoreService.search(collectionName, queryVector, size, relaxed);
+            evaluation = evaluateVectorResults(rawResults, min);
+            belowScoreCount = evaluation.getBelowScoreCount();
+            invalidIdCount = evaluation.getInvalidIdCount();
+            invalidIdSamples = evaluation.getInvalidIdSamples();
+            mappedResults = evaluation.getMappedResults();
+        }
+        // Fallback-2: if all candidates are below threshold, lower threshold to keep recall.
+        if (mappedResults.isEmpty() && rawResults != null && !rawResults.isEmpty()
+                && belowScoreCount == rawResults.size() && min > 0.0d) {
+            log.info("[DIAG][retrieval][vector] fallback|reason=all-below-min-score|oldMinScore={} |newMinScore=0.0", min);
+            evaluation = evaluateVectorResults(rawResults, 0.0d);
+            belowScoreCount = evaluation.getBelowScoreCount();
+            invalidIdCount = evaluation.getInvalidIdCount();
+            invalidIdSamples = evaluation.getInvalidIdSamples();
+            mappedResults = evaluation.getMappedResults();
+        }
+        log.info("[DIAG][retrieval][vector] end|collection={} |rawCount={} |belowScoreCount={} |invalidIdCount={} |invalidIdSamples={} |finalCount={}",
+                collectionName, rawResults.size(), belowScoreCount, invalidIdCount, invalidIdSamples, mappedResults.size());
+        return mappedResults;
     }
 
     /**
@@ -101,10 +158,15 @@ public class RetrievalService {
     public List<RetrievalResultDto> hybridSearch(String query, Integer topK, Double minScore, Map<String, Object> filters) {
         int size = normalizeTopK(topK);
         double min = normalizeMinScore(minScore);
+        log.info("[DIAG][retrieval][hybrid] start|query={} |topK={} |minScore={} |filters={}",
+                querySummary(query), size, min, summarizeFilters(filters));
         List<RetrievalResultDto> vectorResults = vectorSearch(query, size, min, filters);
         List<RetrievalResultDto> keywordResults = keywordSearch(query, size, filters);
         List<RetrievalResultDto> fused = rrfFusion(List.of(vectorResults, keywordResults), size);
-        return deduplicate(fused, size);
+        List<RetrievalResultDto> deduped = deduplicate(fused, size);
+        log.info("[DIAG][retrieval][hybrid] end|vectorCount={} |keywordCount={} |fusedCount={} |dedupedCount={}",
+                vectorResults.size(), keywordResults.size(), fused.size(), deduped.size());
+        return deduped;
     }
 
     /**
@@ -217,7 +279,7 @@ public class RetrievalService {
         if (result == null) {
             return null;
         }
-        Long articleId = parseId(result.getId());
+        Long articleId = resolveVectorArticleId(result);
         if (articleId == null) {
             return null;
         }
@@ -327,6 +389,19 @@ public class RetrievalService {
             filters.put("published_at", range);
         }
         return filters;
+    }
+
+    private String resolveCollectionName(FilterCriteria criteria) {
+        if (criteria != null && criteria.getLanguage() != null) {
+            String lang = criteria.getLanguage().trim().toLowerCase(Locale.ROOT);
+            if ("zh".equals(lang)) {
+                return vectorProperties.getCollectionNameZh();
+            }
+            if ("en".equals(lang)) {
+                return vectorProperties.getCollectionNameEn();
+            }
+        }
+        return vectorProperties.getCollectionName();
     }
 
     /**
@@ -510,5 +585,102 @@ public class RetrievalService {
             }
         }
         return null;
+    }
+
+    private String summarizeFilters(Map<String, Object> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return "{}";
+        }
+        return filters.toString();
+    }
+
+    private List<Map<String, Object>> searchEs(String query,
+                                               int size,
+                                               List<String> fields,
+                                               Map<String, Object> filters,
+                                               String sortBy) {
+        return elasticsearchService.search(esProperties.getIndexName(), query, size, fields, filters, sortBy);
+    }
+
+    private List<RetrievalResultDto> mapEsResults(List<Map<String, Object>> esResults) {
+        return esResults.stream()
+                .map(this::mapEsResult)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private VectorEvaluation evaluateVectorResults(List<SearchResult> rawResults, double minScore) {
+        int belowScoreCount = 0;
+        int invalidIdCount = 0;
+        List<String> invalidIdSamples = new ArrayList<>();
+        List<RetrievalResultDto> mappedResults = new ArrayList<>();
+        for (SearchResult result : rawResults) {
+            if (result == null) {
+                continue;
+            }
+            if (result.getScore() < minScore) {
+                belowScoreCount++;
+                continue;
+            }
+            if (resolveVectorArticleId(result) == null) {
+                invalidIdCount++;
+                if (invalidIdSamples.size() < 3) {
+                    invalidIdSamples.add(String.valueOf(result.getId()));
+                }
+                continue;
+            }
+            RetrievalResultDto dto = mapVectorResult(result);
+            if (dto != null) {
+                mappedResults.add(dto);
+            }
+        }
+        return new VectorEvaluation(mappedResults, belowScoreCount, invalidIdCount, invalidIdSamples);
+    }
+
+    private Long resolveVectorArticleId(SearchResult result) {
+        if (result == null) {
+            return null;
+        }
+        Map<String, Object> payload = result.getPayload();
+        if (payload != null) {
+            Long newsId = parseId(payload.get("news_id"));
+            if (newsId != null) {
+                return newsId;
+            }
+            Long articleId = parseId(payload.get("article_id"));
+            if (articleId != null) {
+                return articleId;
+            }
+        }
+        return parseId(result.getId());
+    }
+
+    private String querySummary(String query) {
+        if (query == null) {
+            return "null";
+        }
+        String compact = Pattern.compile("\\s+").matcher(query).replaceAll(" ").trim();
+        boolean hasCjk = compact.codePoints().anyMatch(this::isCjk);
+        return "len=" + compact.length() + ",hasCjk=" + hasCjk + ",value=" + truncate(compact, 120);
+    }
+
+    private boolean isCjk(int codePoint) {
+        return (codePoint >= 0x4E00 && codePoint <= 0x9FFF)
+                || (codePoint >= 0x3400 && codePoint <= 0x4DBF);
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    @Data
+    private static class VectorEvaluation {
+        private final List<RetrievalResultDto> mappedResults;
+        private final int belowScoreCount;
+        private final int invalidIdCount;
+        private final List<String> invalidIdSamples;
     }
 }

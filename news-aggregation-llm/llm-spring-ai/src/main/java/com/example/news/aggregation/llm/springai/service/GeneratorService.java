@@ -72,7 +72,15 @@ public class GeneratorService {
             }
 
             if (!validator.validate(draft)) {
-                log.warn("GeneratorDraft validation failed, fallback to conservative answer.");
+                int evidenceCount = evidence != null ? evidence.size() : 0;
+                int answerLength = draft.getAnswer() != null ? draft.getAnswer().length() : 0;
+                int citationCount = draft.getCitations() != null ? draft.getCitations().size() : 0;
+                log.warn("GeneratorDraft 校验未通过|evidenceCount={} |answerLength={} |qualityScore={} |citationCount={}",
+                        evidenceCount, answerLength, draft.getQualityScore(), citationCount);
+                if (evidenceCount > 0 && draft.getAnswer() != null && !draft.getAnswer().isBlank()) {
+                    log.warn("存在证据且答案非空，返回最佳努力答案，避免误判为证据不足。");
+                    return draft;
+                }
                 return GeneratorDraft.conservative("证据不足或质量不足");
             }
 

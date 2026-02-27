@@ -54,13 +54,16 @@ public class CitationExtractNode {
 
         Map<String, RetrievalResult> evidenceMap = new HashMap<>();
         for (RetrievalResult result : evidence) {
-            evidenceMap.put(result.getId(), result);
+            String evidenceId = normalizeSourceId(result.getId());
+            if (evidenceId != null && !evidenceId.isBlank()) {
+                evidenceMap.put(evidenceId, result);
+            }
         }
 
         Matcher matcher = CITATION_PATTERN.matcher(answer);
         int position = 0;
         while (matcher.find()) {
-            String sourceId = matcher.group(1);
+            String sourceId = normalizeSourceId(matcher.group(1));
             if (!evidenceMap.containsKey(sourceId)) {
                 continue;
             }
@@ -78,5 +81,16 @@ public class CitationExtractNode {
 
         log.debug("Extracted {} citations", citations.size());
         return citations;
+    }
+
+    private String normalizeSourceId(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.startsWith("[") && value.endsWith("]") && value.length() > 2) {
+            value = value.substring(1, value.length() - 1).trim();
+        }
+        return value;
     }
 }

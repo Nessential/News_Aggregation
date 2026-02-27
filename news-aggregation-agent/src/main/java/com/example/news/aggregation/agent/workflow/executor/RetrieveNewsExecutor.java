@@ -12,9 +12,6 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 向量/混合检索能力。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -32,7 +29,7 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
         return CapabilityMetadata.builder()
                 .name("retrieve_news")
                 .version("v1")
-                .description("向量/混合检索")
+                .description("Retrieve evidence from news store")
                 .timeoutMs(5000L)
                 .costLevel("MEDIUM")
                 .permissionScope("PUBLIC")
@@ -55,7 +52,8 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
                 : "HYBRID";
         Map<String, Object> filters = extractFilters(parameters, context);
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[链路最终] 开始向量/混合检索FLOW|agent|node=retrieve_news|step=start|sessionId={}|mode={}|topK={}|minScore={}|query={}|reason=需要证据|next=检索服务", sessionId, mode, topK, minScore, truncate(query, 200));
+        log.info("[FLOW][retrieve-news] start|sessionId={} |mode={} |topK={} |minScore={} |query={} |filters={} |next=retrieval-client",
+                sessionId, mode, topK, minScore, truncate(query, 200), summarizeFilters(filters));
 
         List<RetrievalResult> results;
         if ("VECTOR".equals(mode)) {
@@ -65,14 +63,11 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
         }
 
         context.addEvidence(results);
-        log.info("[链路最终] 检索完成FLOW|agent|node=retrieve_news|step=end|sessionId={}|resultCount={}|next=证据汇总/重排",
-                sessionId, results.size());
+        log.info("[FLOW][retrieve-news] end|sessionId={} |mode={} |resultCount={} |next=evidence-merge",
+                sessionId, mode, results.size());
         return results;
     }
 
-    /**
-     * 提取通用过滤条件。
-     */
     private Map<String, Object> extractFilters(Map<String, Object> parameters, WorkflowContext context) {
         if (parameters == null || parameters.isEmpty()) {
             return extractFiltersFromContext(context);
@@ -121,6 +116,13 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
             return filters.isEmpty() ? null : filters;
         }
         return null;
+    }
+
+    private String summarizeFilters(Map<String, Object> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return "{}";
+        }
+        return filters.toString();
     }
 
     private static String truncate(String value, int maxLength) {
