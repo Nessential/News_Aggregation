@@ -119,6 +119,8 @@ public class SlotExtractionNode {
             double confidence = root.path("confidence").asDouble(0.0);
             String reason = root.path("reason").asText("");
             java.util.List<String> keywords = parseKeywords(root.path("keywords"));
+            java.util.List<String> expandedKeywords = parseKeywords(root.path("expandedKeywords"));
+            expandedKeywords = removeOverlap(expandedKeywords, keywords);
 
             if (taskFamily == null || taskFamily.isBlank()) {
                 taskFamily = "QA";
@@ -138,8 +140,12 @@ public class SlotExtractionNode {
             putIfNotBlank(params, "publisher", publisher);
             putIfNotBlank(params, "language", language);
             putIfNotEmpty(params, "keywords", keywords);
+            putIfNotEmpty(params, "expandedKeywords", expandedKeywords);
 
             state.setParams(params);
+            log.info("槽位提取参数|keywords={} |expandedKeywords={}",
+                    keywords != null ? keywords : java.util.List.of(),
+                    expandedKeywords != null ? expandedKeywords : java.util.List.of());
             return true;
         } catch (Exception e) {
             log.warn("SlotExtractionNode parse failed: {}", e.getMessage());
@@ -195,6 +201,34 @@ public class SlotExtractionNode {
             }
         }
         return result;
+    }
+
+    private java.util.List<String> removeOverlap(java.util.List<String> expandedKeywords,
+                                                 java.util.List<String> keywords) {
+        if (expandedKeywords == null || expandedKeywords.isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.Set<String> keywordSet = new java.util.HashSet<>();
+        if (keywords != null) {
+            keywords.stream()
+                    .filter(item -> item != null && !item.isBlank())
+                    .forEach(item -> keywordSet.add(item.trim().toLowerCase()));
+        }
+
+        java.util.List<String> filtered = new java.util.ArrayList<>();
+        for (String item : expandedKeywords) {
+            if (item == null || item.isBlank()) {
+                continue;
+            }
+            String normalized = item.trim().toLowerCase();
+            if (keywordSet.contains(normalized)) {
+                continue;
+            }
+            if (!filtered.contains(item)) {
+                filtered.add(item);
+            }
+        }
+        return filtered;
     }
 
     private String extractJson(String raw) {

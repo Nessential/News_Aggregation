@@ -32,6 +32,10 @@ public class RetrievalService {
     private static final double DEFAULT_MIN_SCORE = 0.0;
     // RRF 融合超参数
     private static final int RRF_K = 60;
+    // 关键词上限（避免查询词膨胀）
+    private static final int MAX_KEYWORDS_FOR_QUERY = 3;
+    // 扩展词上限（避免语义漂移）
+    private static final int MAX_EXPANDED_KEYWORDS_FOR_QUERY = 3;
 
     private final ElasticsearchService elasticsearchService;
     private final EsProperties esProperties;
@@ -55,8 +59,10 @@ public class RetrievalService {
         String finalQuery = buildQuery(query, criteria);
         Map<String, Object> esFilters = buildEsFilters(criteria);
         String sortBy = criteria.getSortBy();
-        log.info("[DIAG][retrieval][keyword] start|query={} |finalQuery={} |topK={} |filters={} |sortBy={}",
-                querySummary(query), querySummary(finalQuery), size, summarizeFilters(esFilters), sortBy);
+        int keywordCount = criteria.getKeywords() != null ? criteria.getKeywords().size() : 0;
+        int expandedKeywordCount = criteria.getExpandedKeywords() != null ? criteria.getExpandedKeywords().size() : 0;
+        log.info("[DIAG][retrieval][keyword] start|query={} |finalQuery={} |topK={} |keywordCount={} |expandedKeywordCount={} |filters={} |sortBy={}",
+                querySummary(query), querySummary(finalQuery), size, keywordCount, expandedKeywordCount, summarizeFilters(esFilters), sortBy);
 
         List<String> fields = List.of("title", "summary", "context", "title_cn", "summary_cn", "context_cn");
         Map<String, Object> activeFilters = new HashMap<>(esFilters);
@@ -158,14 +164,32 @@ public class RetrievalService {
     public List<RetrievalResultDto> hybridSearch(String query, Integer topK, Double minScore, Map<String, Object> filters) {
         int size = normalizeTopK(topK);
         double min = normalizeMinScore(minScore);
-        log.info("[DIAG][retrieval][hybrid] start|query={} |topK={} |minScore={} |filters={}",
-                querySummary(query), size, min, summarizeFilters(filters));
+        FilterCriteria criteria = parseFilters(filters);
+        int keywordCount = criteria.getKeywords() != null ? criteria.getKeywords().size() : 0;
+        int expandedKeywordCount = criteria.getExpandedKeywords() != null ? criteria.getExpandedKeywords().size() : 0;
+        log.info("[DIAG][retrieval][hybrid] start|query={} |topK={} |minScore={} |keywordCount={} |expandedKeywordCount={} |filters={}",
+                querySummary(query), size, min, keywordCount, expandedKeywordCount, summarizeFilters(filters));
         List<RetrievalResultDto> vectorResults = vectorSearch(query, size, min, filters);
         List<RetrievalResultDto> keywordResults = keywordSearch(query, size, filters);
         List<RetrievalResultDto> fused = rrfFusion(List.of(vectorResults, keywordResults), size);
         List<RetrievalResultDto> deduped = deduplicate(fused, size);
-        log.info("[DIAG][retrieval][hybrid] end|vectorCount={} |keywordCount={} |fusedCount={} |dedupedCount={}",
-                vectorResults.size(), keywordResults.size(), fused.size(), deduped.size());
+
+        Set<Long> vectorIds = vectorResults.stream()
+                .map(RetrievalResultDto::getArticleId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<Long> keywordIds = keywordResults.stream()
+                .map(RetrievalResultDto::getArticleId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        int bothHitCount = (int) vectorIds.stream().filter(keywordIds::contains).count();
+        int vectorOnlyCount = Math.max(0, vectorIds.size() - bothHitCount);
+        int keywordOnlyCount = Math.max(0, keywordIds.size() - bothHitCount);
+        String dedupRatio = fused.isEmpty()
+                ? "1.00"
+                : String.format(Locale.ROOT, "%.2f", (double) deduped.size() / (double) fused.size());
+        log.info("[DIAG][retrieval][hybrid] end|vectorCount={} |keywordCount={} |bothHitCount={} |vectorOnlyCount={} |keywordOnlyCount={} |fusedCount={} |dedupedCount={} |dedupRatio={}",
+                vectorResults.size(), keywordResults.size(), bothHitCount, vectorOnlyCount, keywordOnlyCount, fused.size(), deduped.size(), dedupRatio);
         return deduped;
     }
 
@@ -313,23 +337,23 @@ public class RetrievalService {
      * 构建综合查询文本
      */
     private String buildQuery(String query, FilterCriteria criteria) {
-        StringBuilder builder = new StringBuilder();
+        LinkedHashSet<String> terms = new LinkedHashSet<>();
         if (query != null && !query.isBlank()) {
-            builder.append(query.trim());
+            terms.add(query.trim());
         }
-        if (criteria.getKeywords() != null && !criteria.getKeywords().isEmpty()) {
-            if (builder.length() > 0) {
-                builder.append(" ");
-            }
-            builder.append(String.join(" ", criteria.getKeywords()));
-        }
+
+        List<String> keywords = normalizeTerms(criteria.getKeywords(), MAX_KEYWORDS_FOR_QUERY);
+        keywords.forEach(terms::add);
+
+        List<String> expandedKeywords = normalizeTerms(criteria.getExpandedKeywords(), MAX_EXPANDED_KEYWORDS_FOR_QUERY).stream()
+                .filter(item -> keywords.stream().noneMatch(keyword -> keyword.equalsIgnoreCase(item)))
+                .collect(Collectors.toList());
+        expandedKeywords.forEach(terms::add);
+
         if (criteria.getTopic() != null && !criteria.getTopic().isBlank()) {
-            if (builder.length() > 0) {
-                builder.append(" ");
-            }
-            builder.append(criteria.getTopic().trim());
+            terms.add(criteria.getTopic().trim());
         }
-        return builder.toString().trim();
+        return String.join(" ", terms).trim();
     }
 
     /**
@@ -416,6 +440,8 @@ public class RetrievalService {
         criteria.setStartTime(parseDateToMillis(filters.get("startDate")));
         criteria.setEndTime(parseDateToMillis(filters.get("endDate")));
         criteria.setKeywords(parseStringList(filters.get("keywords")));
+        criteria.setExpandedKeywords(parseStringList(
+                firstPresent(filters, "expandedKeywords", "expanded_keywords", "expanded-keywords")));
         criteria.setTopic(getString(filters.get("topic")));
         criteria.setCategory(getString(filters.get("category")));
         criteria.setLanguage(getString(filters.get("language")));
@@ -454,7 +480,10 @@ public class RetrievalService {
             List<String> result = new ArrayList<>();
             for (Object item : list) {
                 if (item != null && !String.valueOf(item).isBlank()) {
-                    result.add(String.valueOf(item));
+                    String text = String.valueOf(item).trim();
+                    if (!result.contains(text)) {
+                        result.add(text);
+                    }
                 }
             }
             return result.isEmpty() ? null : result;
@@ -464,6 +493,45 @@ public class RetrievalService {
             return null;
         }
         return Arrays.asList(text.split("\\s*,\\s*"));
+    }
+
+    private Object firstPresent(Map<String, Object> source, String... keys) {
+        if (source == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if (source.containsKey(key)) {
+                Object value = source.get(key);
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+        return null;
+    }
+
+    private List<String> normalizeTerms(List<String> raw, int maxSize) {
+        if (raw == null || raw.isEmpty() || maxSize <= 0) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String item : raw) {
+            if (item == null || item.isBlank()) {
+                continue;
+            }
+            String term = item.trim();
+            String normalized = term.toLowerCase(Locale.ROOT);
+            if (seen.contains(normalized)) {
+                continue;
+            }
+            seen.add(normalized);
+            result.add(term);
+            if (result.size() >= maxSize) {
+                break;
+            }
+        }
+        return result;
     }
 
     /**
@@ -549,6 +617,7 @@ public class RetrievalService {
         private Long startTime;
         private Long endTime;
         private List<String> keywords;
+        private List<String> expandedKeywords;
         private String topic;
         private String category;
         private String language;

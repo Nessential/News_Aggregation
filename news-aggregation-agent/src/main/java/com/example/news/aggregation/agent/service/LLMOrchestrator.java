@@ -70,6 +70,7 @@ public class LLMOrchestrator {
         if (routerResult == null) {
             routerResult = RouterResult.defaultQA();
         }
+        normalizeRetrievalMode(routerResult);
         log.info("[链路最终] 路由完成: sessionId={}, taskFamily={}, retrievalMode={}, needsClarification={}",
                 sessionId, routerResult.getTaskFamily(), routerResult.getRetrievalMode(), routerResult.getNeedsClarification());
 
@@ -365,6 +366,7 @@ public class LLMOrchestrator {
         putIfPresent(filters, "startDate", params, "startDate", "start_date");
         putIfPresent(filters, "endDate", params, "endDate", "end_date");
         putIfPresent(filters, "keywords", params, "keywords");
+        putIfPresent(filters, "expandedKeywords", params, "expandedKeywords", "expanded_keywords");
         putIfPresent(filters, "topic", params, "topic");
         putIfPresent(filters, "category", params, "category");
         putIfPresent(filters, "language", params, "language", "lang");
@@ -387,6 +389,22 @@ public class LLMOrchestrator {
                     return;
                 }
             }
+        }
+    }
+
+    private void normalizeRetrievalMode(RouterResult routerResult) {
+        if (routerResult == null) {
+            return;
+        }
+        String intentScope = routerResult.getIntentScope();
+        String retrievalMode = routerResult.getRetrievalMode();
+        if (intentScope != null
+                && "NEWS".equalsIgnoreCase(intentScope)
+                && retrievalMode != null
+                && !"NONE".equalsIgnoreCase(retrievalMode)
+                && !"HYBRID".equalsIgnoreCase(retrievalMode)) {
+            log.info("[链路最终] 检索模式归一化: intentScope=NEWS, oldMode={}, newMode=HYBRID", retrievalMode);
+            routerResult.setRetrievalMode("HYBRID");
         }
     }
 
