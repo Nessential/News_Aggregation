@@ -87,9 +87,16 @@ app:
   agent:
     # 会话管理
     session:
+      # Session/Turn/幂等记录在 Redis 中的默认过期时间（分钟）
       timeout-minutes: 30
       max-history-size: 50
       redis-key-prefix: "session:"
+      # 锁持有者标记（session:lock:owner:{sessionId}）的 TTL（秒）
+      # 仅用于返回 runningTurnId 和排障，不是分布式锁本体的过期时间
+      lock-owner-ttl-seconds: 300
+      # Redisson 看门狗超时（毫秒）
+      # 使用 tryLock() 且不指定 leaseTime 时，锁会按该参数自动续租
+      watchdog-timeout-ms: 90000
     
     # Pipeline配置
     pipeline:

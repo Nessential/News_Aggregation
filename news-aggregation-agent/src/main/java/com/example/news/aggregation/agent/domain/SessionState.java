@@ -14,7 +14,8 @@ import java.util.List;
 
 /**
  * 会话状态。
- * 保存用户对话上下文并持久化到 Redis。
+ * <p>
+ * 保存用户会话级长期上下文，不承载单轮执行中的瞬时状态。
  */
 @Data
 @Builder
@@ -25,24 +26,27 @@ public class SessionState implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** 会话 ID */
+    /** 会话ID */
     private String sessionId;
 
-    /** 用户 ID */
+    /** 用户ID */
     private String userId;
 
-    /** 当前对话状态 */
+    /** 当前会话状态（兼容字段，单轮状态以 TurnState 为准） */
     @Builder.Default
     private ConversationState conversationState = ConversationState.START;
+
+    /** 当前正在执行的轮次ID，用于会话内并发控制 */
+    private String activeTurnId;
 
     /** 用户约束条件 */
     private Constraints constraints;
 
-    /** 对话历史（用户 query + Agent 回复） */
+    /** 对话历史（用户问题 + Agent回复） */
     @Builder.Default
     private List<String> history = new ArrayList<>();
 
-    /** 当前候选文档 ID 列表 */
+    /** 当前候选文章ID */
     @Builder.Default
     private List<Long> currentCandidates = new ArrayList<>();
 
@@ -54,13 +58,13 @@ public class SessionState implements Serializable {
     @Builder.Default
     private Integer budget = 10;
 
-    /** 会话创建时间 */
+    /** 创建时间 */
     private LocalDateTime createdAt;
 
-    /** 最后更新时间 */
+    /** 更新时间 */
     private LocalDateTime updatedAt;
 
-    /** 添加对话历史 */
+    /** 添加会话历史 */
     public void addHistory(String message) {
         if (history == null) {
             history = new ArrayList<>();
@@ -78,7 +82,7 @@ public class SessionState implements Serializable {
         this.updatedAt = LocalDateTime.now();
     }
 
-    /** 更新候选文档 */
+    /** 更新候选结果 */
     public void updateCandidates(List<Long> articleIds) {
         this.currentCandidates = articleIds;
         this.updatedAt = LocalDateTime.now();
@@ -95,3 +99,4 @@ public class SessionState implements Serializable {
         return budget != null && budget <= 0;
     }
 }
+

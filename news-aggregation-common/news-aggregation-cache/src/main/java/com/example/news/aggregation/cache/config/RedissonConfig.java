@@ -8,29 +8,38 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Redisson配置 - 提供分布式锁
+ * Redisson 配置。
+ * <p>
+ * lockWatchdogTimeout 用于看门狗续租，避免长请求执行时锁提前过期。
  */
 @Configuration
 public class RedissonConfig {
 
-    @Value("${spring.redis.host:localhost}")
+    @Value("${spring.data.redis.host:${spring.redis.host:localhost}}")
     private String host;
 
-    @Value("${spring.redis.port:6379}")
+    @Value("${spring.data.redis.port:${spring.redis.port:6379}}")
     private Integer port;
 
-    @Value("${spring.redis.password:}")
+    @Value("${spring.data.redis.password:${spring.redis.password:}}")
     private String password;
+
+    @Value("${spring.data.redis.database:${spring.redis.database:0}}")
+    private Integer database;
+
+    @Value("${app.agent.session.watchdog-timeout-ms:90000}")
+    private Long watchdogTimeoutMs;
 
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient() {
         Config config = new Config();
+        config.setLockWatchdogTimeout(watchdogTimeoutMs);
 
         String address = "redis://" + host + ":" + port;
         config.useSingleServer()
                 .setAddress(address)
-                .setPassword(password.isEmpty() ? null : password)
-                .setDatabase(0)
+                .setPassword(password == null || password.isBlank() ? null : password)
+                .setDatabase(database)
                 .setConnectionPoolSize(200)
                 .setConnectionMinimumIdleSize(10)
                 .setRetryAttempts(3)
@@ -39,3 +48,4 @@ public class RedissonConfig {
         return Redisson.create(config);
     }
 }
+
