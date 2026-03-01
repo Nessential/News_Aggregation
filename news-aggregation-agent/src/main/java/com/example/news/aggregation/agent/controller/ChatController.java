@@ -9,14 +9,14 @@ import com.example.news.aggregation.agent.service.LLMOrchestrator;
 import com.example.news.aggregation.agent.service.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 
 /**
- * Chat 控制器。
- * 负责对话入口、会话管理与响应组装。
+ * 对话控制器。
  */
 @Slf4j
 @RestController
@@ -28,37 +28,46 @@ public class ChatController {
     private final LLMOrchestrator llmOrchestrator;
 
     /**
-     * 对话入口：接收用户 query 并返回 AgentResponse。
+     * 对话入口。
      */
     @PostMapping("/chat")
     public ResponseEntity<AgentResponse> chat(@RequestBody ChatRequest request) {
-        log.info("接收对话请求: sessionId={}, query={}", request.getSessionId(), request.getQuery());
+        log.info("[api-step-01] 收到请求: sessionId={}, turnId={}, query={}",
+                request.getSessionId(), request.getTurnId(), truncate(request.getQuery(), 120));
         try {
             if (request.getUserId() == null || request.getUserId().isBlank()) {
                 request.setUserId("anonymous");
             }
-            log.info("[entry] 进入对话入口FLOW|agent|entry|sessionId={}|userId={}|query={}",
-                    request.getSessionId(), request.getUserId(), truncate(request.getQuery(), 200));
-            // 统一编排入口
+
             AgentResponse response = llmOrchestrator.handleChat(request);
+            if ("SESSION_BUSY".equals(response.getErrorCode())) {
+                log.warn("[api-step-02] 会话并发冲突: sessionId={}, turnId={}, runningTurnId={}",
+                        response.getSessionId(), response.getTurnId(), response.getRunningTurnId());
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+            }
+            if ("IDEMPOTENCY_IN_PROGRESS".equals(response.getErrorCode())) {
+                log.info("[api-step-03] 幂等请求处理中: sessionId={}, turnId={}, runningTurnId={}",
+                        response.getSessionId(), response.getTurnId(), response.getRunningTurnId());
+                return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+            }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("Chat request failed", e);
-            return ResponseEntity.status(500).body(buildErrorResponse(
+            log.error("[api-step-xx] 对话请求失败", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(buildErrorResponse(
                     request.getSessionId(),
+                    request.getTurnId(),
                     "内部错误: " + e.getMessage()
             ));
         }
     }
 
     /**
-     * 创建新会话。
+     * 创建会话。
      */
     @PostMapping("/session")
     public ResponseEntity<SessionResponse> createSession(@RequestBody CreateSessionRequest request) {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
         SessionState sessionState = sessionManager.createSession(userId);
-
         return ResponseEntity.ok(SessionResponse.builder()
                 .sessionId(sessionState.getSessionId())
                 .userId(sessionState.getUserId())
@@ -87,15 +96,13 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
-    // ========= Private Methods =========
-
-    /**
-     * 构建错误响应。
-     */
-    private AgentResponse buildErrorResponse(String sessionId, String errorMessage) {
+    private AgentResponse buildErrorResponse(String sessionId, String turnId, String errorMessage) {
         return AgentResponse.builder()
                 .sessionId(sessionId)
-                .answer("抱歉，处理您的请求时出现错误：" + errorMessage)
+                .turnId(turnId)
+                .turnStatus("FAILED")
+                .errorCode("INTERNAL_ERROR")
+                .answer("抱歉，处理请求时出现错误：" + errorMessage)
                 .timestamp(LocalDateTime.now())
                 .build();
     }

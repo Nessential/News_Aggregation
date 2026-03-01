@@ -6,6 +6,8 @@ import com.example.news.aggregation.agent.domain.SessionState;
 import com.example.news.aggregation.agent.enums.ConversationState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -17,7 +19,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 会话管理器。
- * 负责 Session 状态的创建、读取与更新。
+ * <p>
+ * 负责 Session 级数据读写，以及同会话并发锁控制。
  */
 @Slf4j
 @Service
@@ -25,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class SessionManager {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final RedissonClient redissonClient;
 
     @Value("${app.agent.session.timeout-minutes:30}")
     private int sessionTimeoutMinutes;
@@ -32,7 +36,12 @@ public class SessionManager {
     @Value("${app.agent.session.max-history-size:50}")
     private int maxHistorySize;
 
+    @Value("${app.agent.session.lock-owner-ttl-seconds:300}")
+    private int lockOwnerTtlSeconds;
+
     private static final String SESSION_KEY_PREFIX = "session:";
+    private static final String SESSION_LOCK_KEY_PREFIX = "session:lock:";
+    private static final String SESSION_LOCK_OWNER_KEY_PREFIX = "session:lock:owner:";
 
     /**
      * 创建新会话。
@@ -51,21 +60,21 @@ public class SessionManager {
                 .build();
 
         saveSession(sessionState);
-        log.info("Created new session: {} for user: {}", sessionId, userId);
+        log.info("[session] 创建会话成功: sessionId={}, userId={}", sessionId, userId);
         return sessionState;
     }
 
     /**
-     * 获取会话状态。
+     * 获取会话。
      */
     public SessionState getSession(String sessionId) {
         String key = buildKey(sessionId);
         SessionState sessionState = (SessionState) redisTemplate.opsForValue().get(key);
         if (sessionState == null) {
-            log.warn("Session not found: {}", sessionId);
+            log.warn("[session] 会话不存在: sessionId={}", sessionId);
             return null;
         }
-        // 刷新过期时间
+        // 读会话时刷新过期时间，保持活跃会话可用。
         redisTemplate.expire(key, sessionTimeoutMinutes, TimeUnit.MINUTES);
         return sessionState;
     }
@@ -76,28 +85,26 @@ public class SessionManager {
     public void updateConstraints(String sessionId, Constraints constraints) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot update constraints for non-existent session: {}", sessionId);
+            log.error("[session] 更新约束失败，会话不存在: sessionId={}", sessionId);
             return;
         }
         sessionState.setConstraints(constraints);
         sessionState.setUpdatedAt(LocalDateTime.now());
         saveSession(sessionState);
-        log.debug("Updated constraints for session: {}", sessionId);
     }
 
     /**
-     * 添加对话历史。
+     * 添加历史消息。
      */
     public void addHistory(String sessionId, String message) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot add history for non-existent session: {}", sessionId);
+            log.error("[session] 写历史失败，会话不存在: sessionId={}", sessionId);
             return;
         }
+
         sessionState.addHistory(message);
-
-        // 限制历史记录大小
-
+        // 控制历史长度，避免单会话无限增长。
         if (sessionState.getHistory().size() > maxHistorySize) {
             sessionState.setHistory(
                     sessionState.getHistory().subList(
@@ -107,7 +114,6 @@ public class SessionManager {
             );
         }
         saveSession(sessionState);
-        log.debug("Added history to session: {}, current size: {}", sessionId, sessionState.getHistory().size());
     }
 
     /**
@@ -116,12 +122,11 @@ public class SessionManager {
     public void addAttempt(String sessionId, RetrievalAttempt attempt) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot add attempt for non-existent session: {}", sessionId);
+            log.error("[session] 记录尝试失败，会话不存在: sessionId={}", sessionId);
             return;
         }
         sessionState.addAttempt(attempt);
         saveSession(sessionState);
-        log.debug("Recorded retrieval attempt #{} for session: {}", attempt.getAttemptNumber(), sessionId);
     }
 
     /**
@@ -130,30 +135,27 @@ public class SessionManager {
     public void updateCandidates(String sessionId, List<Long> articleIds) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot update candidates for non-existent session: {}", sessionId);
+            log.error("[session] 更新候选失败，会话不存在: sessionId={}", sessionId);
             return;
         }
-
         sessionState.updateCandidates(articleIds);
         saveSession(sessionState);
-        log.debug("Updated candidates for session: {}, count: {}", sessionId, articleIds.size());
     }
 
     /**
-     * 更新对话状态。
+     * 更新会话状态。
      */
     public void updateConversationState(String sessionId, ConversationState newState) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot update state for non-existent session: {}", sessionId);
+            log.error("[session] 更新状态失败，会话不存在: sessionId={}", sessionId);
             return;
         }
-
         ConversationState oldState = sessionState.getConversationState();
         sessionState.setConversationState(newState);
         sessionState.setUpdatedAt(LocalDateTime.now());
         saveSession(sessionState);
-        log.info("[fsm] Session {} state transition: {} -> {}", sessionId, oldState, newState);
+        log.info("[fsm] 会话状态迁移: sessionId={}, from={}, to={}", sessionId, oldState, newState);
     }
 
     /**
@@ -162,54 +164,142 @@ public class SessionManager {
     public void consumeBudget(String sessionId, int amount) {
         SessionState sessionState = getSession(sessionId);
         if (sessionState == null) {
-            log.error("Cannot consume budget for non-existent session: {}", sessionId);
+            log.error("[session] 消耗预算失败，会话不存在: sessionId={}", sessionId);
             return;
         }
-
         sessionState.consumeBudget(amount);
         saveSession(sessionState);
-        log.debug("Consumed {} budget for session: {}, remaining: {}", amount, sessionId, sessionState.getBudget());
     }
 
     /**
-     * 删除会话。
+     * 删除会话及锁相关状态。
      */
     public void deleteSession(String sessionId) {
-        String key = buildKey(sessionId);
-        redisTemplate.delete(key);
-        log.info("Deleted session: {}", sessionId);
+        redisTemplate.delete(buildKey(sessionId));
+        redisTemplate.delete(buildLockOwnerKey(sessionId));
+        try {
+            RLock lock = redissonClient.getLock(buildLockKey(sessionId));
+            if (lock.isLocked() && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        } catch (Exception e) {
+            log.warn("[session-lock] 删除会话时释放锁失败: sessionId={}, error={}", sessionId, e.getMessage());
+        }
+        log.info("[session] 删除会话: sessionId={}", sessionId);
     }
 
     /**
-     * 检查会话是否存在。
+     * 判断会话是否存在。
      */
     public boolean sessionExists(String sessionId) {
-        String key = buildKey(sessionId);
-        Boolean exists = redisTemplate.hasKey(key);
+        Boolean exists = redisTemplate.hasKey(buildKey(sessionId));
         return exists != null && exists;
     }
 
-    // ========= Private Methods =========
-
     /**
-     * 保存会话到 Redis。
+     * 尝试获取会话级锁（Redisson 看门狗自动续租）。
      */
-    private void saveSession(SessionState sessionState) {
-        String key = buildKey(sessionState.getSessionId());
-        redisTemplate.opsForValue().set(key, sessionState, sessionTimeoutMinutes, TimeUnit.MINUTES);
+    public boolean tryAcquireSessionLock(String sessionId, String turnId) {
+        RLock lock = redissonClient.getLock(buildLockKey(sessionId));
+        boolean success = lock.tryLock();
+        if (success) {
+            setActiveTurnId(sessionId, turnId);
+            // 记录锁持有者，便于返回 runningTurnId。TTL 防止异常退出后长期脏数据。
+            redisTemplate.opsForValue().set(
+                    buildLockOwnerKey(sessionId),
+                    turnId,
+                    lockOwnerTtlSeconds,
+                    TimeUnit.SECONDS
+            );
+            log.info("[session-lock-step-01] 获取会话锁成功: sessionId={}, turnId={}", sessionId, turnId);
+        } else {
+            Object holder = redisTemplate.opsForValue().get(buildLockOwnerKey(sessionId));
+            log.warn("[session-lock-step-01] 获取会话锁失败: sessionId={}, requestTurnId={}, holderTurnId={}",
+                    sessionId, turnId, holder);
+        }
+        return success;
     }
 
     /**
-     * 生成会话 ID。
+     * 释放会话级锁（仅持有线程可释放）。
      */
+    public void releaseSessionLock(String sessionId, String turnId) {
+        RLock lock = redissonClient.getLock(buildLockKey(sessionId));
+        try {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+                clearActiveTurnId(sessionId, turnId);
+                Object holder = redisTemplate.opsForValue().get(buildLockOwnerKey(sessionId));
+                if (holder != null && turnId.equals(String.valueOf(holder))) {
+                    redisTemplate.delete(buildLockOwnerKey(sessionId));
+                }
+                log.info("[session-lock-step-02] 释放会话锁成功: sessionId={}, turnId={}", sessionId, turnId);
+                return;
+            }
+            log.warn("[session-lock-step-02] 当前线程非锁持有者，跳过释放: sessionId={}, turnId={}",
+                    sessionId, turnId);
+        } catch (Exception e) {
+            log.error("[session-lock-step-02] 释放会话锁异常: sessionId={}, turnId={}", sessionId, turnId, e);
+        }
+    }
+
+    /**
+     * 查询当前运行中的 turnId。
+     */
+    public String getRunningTurnId(String sessionId) {
+        Object holder = redisTemplate.opsForValue().get(buildLockOwnerKey(sessionId));
+        if (holder != null) {
+            return String.valueOf(holder);
+        }
+        SessionState sessionState = getSession(sessionId);
+        return sessionState != null ? sessionState.getActiveTurnId() : null;
+    }
+
+    private void saveSession(SessionState sessionState) {
+        redisTemplate.opsForValue().set(
+                buildKey(sessionState.getSessionId()),
+                sessionState,
+                sessionTimeoutMinutes,
+                TimeUnit.MINUTES
+        );
+    }
+
     private String generateSessionId() {
         return UUID.randomUUID().toString().replace("-", "");
     }
 
-    /**
-     * 构建 Redis Key。
-     */
     private String buildKey(String sessionId) {
         return SESSION_KEY_PREFIX + sessionId;
     }
+
+    private String buildLockKey(String sessionId) {
+        return SESSION_LOCK_KEY_PREFIX + sessionId;
+    }
+
+    private String buildLockOwnerKey(String sessionId) {
+        return SESSION_LOCK_OWNER_KEY_PREFIX + sessionId;
+    }
+
+    private void setActiveTurnId(String sessionId, String turnId) {
+        SessionState sessionState = getSession(sessionId);
+        if (sessionState == null) {
+            return;
+        }
+        sessionState.setActiveTurnId(turnId);
+        sessionState.setUpdatedAt(LocalDateTime.now());
+        saveSession(sessionState);
+    }
+
+    private void clearActiveTurnId(String sessionId, String turnId) {
+        SessionState sessionState = getSession(sessionId);
+        if (sessionState == null) {
+            return;
+        }
+        if (turnId.equals(sessionState.getActiveTurnId())) {
+            sessionState.setActiveTurnId(null);
+            sessionState.setUpdatedAt(LocalDateTime.now());
+            saveSession(sessionState);
+        }
+    }
 }
+

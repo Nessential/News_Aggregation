@@ -11,8 +11,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Agent 响应。
- * 统一的 Agent 输出格式，包含答案、候选文章、引用等。
+ * Agent 统一响应体。
  */
 @Data
 @Builder
@@ -21,34 +20,34 @@ import java.util.List;
 public class AgentResponse implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    /** 会话 ID */
+    /** 会话ID */
     private String sessionId;
+    /** 轮次ID */
+    private String turnId;
+    /** 轮次状态，例如 DONE/FAILED/BUSY */
+    private String turnStatus;
+    /** 错误码，例如 SESSION_BUSY */
+    private String errorCode;
+    /** 当前占用会话锁的轮次ID */
+    private String runningTurnId;
 
     /** 生成的答案文本 */
     private String answer;
-
     /** 候选文章列表 */
     private List<Candidate> candidates;
-
-    /** 引用信息（文章 ID 列表） */
+    /** 引用信息（文章ID列表） */
     private List<String> citations;
-
     /** 任务类型 */
     private TaskFamily taskFamily;
-
     /** 是否需要追问 */
     private Boolean needsClarification;
-
-    /** 追问建议（如果需要追问） */
+    /** 追问提示 */
     private String clarificationPrompt;
-
-    /** 响应时间戳 */
+    /** 响应时间 */
     private LocalDateTime timestamp;
-
     /** 执行耗时（毫秒） */
     private Long executionTimeMs;
-
-    /** 元数据（调试信息） */
+    /** 响应元数据 */
     private ResponseMetadata metadata;
 
     /**
@@ -61,16 +60,14 @@ public class AgentResponse implements Serializable {
     public static class ResponseMetadata implements Serializable {
         private static final long serialVersionUID = 1L;
 
-        /** 检索到的文档数量 */
+        /** 检索文档数量 */
         private Integer retrievedCount;
-
         /** LLM 调用次数 */
         private Integer llmCallCount;
-
-        /** 使用的 Pipeline 类型 */
+        /** 执行链路类型 */
         private String pipelineType;
-
-        /** 剩余预算 */
+        /** 会话剩余预算 */
         private Integer remainingBudget;
     }
 }
+

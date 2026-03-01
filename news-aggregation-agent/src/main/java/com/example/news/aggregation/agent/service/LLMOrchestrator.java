@@ -3,12 +3,15 @@ package com.example.news.aggregation.agent.service;
 import com.example.news.aggregation.agent.client.PlannerClient;
 import com.example.news.aggregation.agent.client.RouterClient;
 import com.example.news.aggregation.agent.domain.AgentResponse;
+import com.example.news.aggregation.agent.domain.IdempotencyRecord;
 import com.example.news.aggregation.agent.domain.PipelineContext;
 import com.example.news.aggregation.agent.domain.PipelineResult;
 import com.example.news.aggregation.agent.domain.SessionState;
 import com.example.news.aggregation.agent.dto.ChatRequest;
 import com.example.news.aggregation.agent.enums.ConversationState;
+import com.example.news.aggregation.agent.enums.IdempotencyStatus;
 import com.example.news.aggregation.agent.enums.TaskFamily;
+import com.example.news.aggregation.agent.enums.TurnStatus;
 import com.example.news.aggregation.agent.fsm.ConversationFSM;
 import com.example.news.aggregation.agent.fsm.FSMContext;
 import com.example.news.aggregation.agent.tool.dto.RetrievalResult;
@@ -28,10 +31,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * 统一编排入口：Router -> Planner/Workflow -> FSM -> 响应组装。
+ * 统一编排入口：Router -> Planner/Workflow -> FSM -> Response。
+ * <p>
+ * 关键改造点：
+ * 1) 每个请求对应一个独立 turn；2) 会话级锁保证同 session 串行；
+ * 3) turn 级幂等，避免客户端重试导致重复执行。
  */
 @Slf4j
 @Service
@@ -39,6 +47,7 @@ import java.util.stream.Collectors;
 public class LLMOrchestrator {
 
     private final SessionManager sessionManager;
+    private final TurnManager turnManager;
     private final RouterClient routerClient;
     private final PlannerClient plannerClient;
     private final WorkflowOrchestrator workflowOrchestrator;
@@ -49,17 +58,112 @@ public class LLMOrchestrator {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
         SessionState sessionState = getOrCreateSession(request, userId);
         String sessionId = sessionState.getSessionId();
-        log.info("[链路最终] 开始处理对话: sessionId={}, userId={}, query={}", sessionId, userId, request.getQuery());
+        String turnId = resolveTurnId(request);
+        request.setSessionId(sessionId);
+        request.setTurnId(turnId);
+        String requestHash = buildRequestHash(request);
+        String idempotencyKey = resolveIdempotencyKey(request, sessionId, turnId);
+        request.setIdempotencyKey(idempotencyKey);
+
+        log.info("[turn-step-01] 接收请求: sessionId={}, turnId={}, idempotencyKey={}, userId={}, query={}",
+                sessionId, turnId, idempotencyKey, userId, truncate(request.getQuery(), 200));
+
+        // 步骤2：按 idempotencyKey 查询记录。
+        IdempotencyRecord idempotencyRecord = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
+        AgentResponse replayFromRecord = replayFromIdempotencyRecord(sessionId, turnId, idempotencyRecord);
+        if (replayFromRecord != null) {
+            log.info("[turn-step-02] 幂等命中: sessionId={}, turnId={}, idempotencyKey={}, status={}",
+                    sessionId, turnId, idempotencyKey, idempotencyRecord.getStatus());
+            return replayFromRecord;
+        }
+
+        // 步骤3：会话串行锁。
+        if (!sessionManager.tryAcquireSessionLock(sessionId, turnId)) {
+            // 锁冲突时再查一次幂等，避免“同 key 重试”误返回 409。
+            IdempotencyRecord retryRecord = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
+            AgentResponse retryReplay = replayFromIdempotencyRecord(sessionId, turnId, retryRecord);
+            if (retryReplay != null) {
+                log.info("[turn-step-03] 锁冲突但幂等可回放: sessionId={}, turnId={}, idempotencyKey={}, status={}",
+                        sessionId, turnId, idempotencyKey, retryRecord.getStatus());
+                return retryReplay;
+            }
+            String runningTurnId = sessionManager.getRunningTurnId(sessionId);
+            log.warn("[turn-step-03] 会话忙，拒绝并发请求: sessionId={}, turnId={}, runningTurnId={}",
+                    sessionId, turnId, runningTurnId);
+            return buildBusyResponse(sessionId, turnId, runningTurnId);
+        }
+
+        try {
+            // 步骤4：创建 IN_PROGRESS 幂等记录。失败说明已有并发写入，按记录回放。
+            boolean inProgressCreated = turnManager.tryCreateInProgressRecord(
+                    sessionId,
+                    idempotencyKey,
+                    turnId,
+                    requestHash
+            );
+            if (!inProgressCreated) {
+                IdempotencyRecord existing = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
+                AgentResponse replay = replayFromIdempotencyRecord(sessionId, turnId, existing);
+                if (replay != null) {
+                    log.info("[turn-step-04] 幂等记录已存在，直接回放: sessionId={}, turnId={}, idempotencyKey={}, status={}",
+                            sessionId, turnId, idempotencyKey, existing.getStatus());
+                    return replay;
+                }
+            }
+
+            // 步骤5：创建运行中 turn，并将本轮 FSM 起点重置到 START。
+            turnManager.createRunningTurn(sessionId, turnId, requestHash);
+            sessionManager.updateConversationState(sessionId, ConversationState.START);
+            sessionState.setConversationState(ConversationState.START);
+
+            AgentResponse response = executeSingleTurn(request, sessionState, turnId);
+            response.setSessionId(sessionId);
+            response.setTurnId(turnId);
+            response.setTurnStatus(TurnStatus.DONE.name());
+            response.setErrorCode(null);
+            response.setRunningTurnId(null);
+
+            turnManager.markTurnDone(sessionId, turnId, response);
+            turnManager.markIdempotencyDone(sessionId, idempotencyKey, turnId, response);
+            log.info("[turn-step-99] 本轮完成: sessionId={}, turnId={}", sessionId, turnId);
+            return response;
+        } catch (Exception e) {
+            log.error("[turn-step-xx] 本轮失败: sessionId={}, turnId={}", sessionId, turnId, e);
+            AgentResponse failed = AgentResponse.builder()
+                    .sessionId(sessionId)
+                    .turnId(turnId)
+                    .turnStatus(TurnStatus.FAILED.name())
+                    .errorCode("TURN_EXECUTION_FAILED")
+                    .answer("抱歉，处理本轮请求时出现异常：" + e.getMessage())
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            turnManager.markTurnFailed(sessionId, turnId, failed.getErrorCode(), e.getMessage());
+            turnManager.markIdempotencyFailed(
+                    sessionId,
+                    idempotencyKey,
+                    turnId,
+                    failed.getErrorCode(),
+                    e.getMessage(),
+                    failed
+            );
+            return failed;
+        } finally {
+            sessionManager.releaseSessionLock(sessionId, turnId);
+        }
+    }
+
+    private AgentResponse executeSingleTurn(ChatRequest request, SessionState sessionState, String turnId) {
+        String sessionId = sessionState.getSessionId();
 
         if (sessionState.isBudgetExhausted()) {
-            return buildBudgetExhaustedResponse(sessionState);
+            return buildBudgetExhaustedResponse(sessionState, turnId);
         }
 
         sessionManager.addHistory(sessionId, "User: " + request.getQuery());
 
-        log.info("[fsm] 进入路由阶段FLOW|agent|fsm|from={}|to={}|reason=收到用户请求|next=Router",
-                sessionState.getConversationState(), ConversationState.ROUTE);
-        transitionState(sessionState, ConversationState.ROUTE);
+        log.info("[fsm-step-01] 进入路由: sessionId={}, turnId={}, from={}, to={}",
+                sessionId, turnId, sessionState.getConversationState(), ConversationState.ROUTE);
+        transitionState(sessionState, ConversationState.ROUTE, turnId);
 
         RouterResult routerResult = routerClient.route(
                 sessionId,
@@ -71,12 +175,9 @@ public class LLMOrchestrator {
             routerResult = RouterResult.defaultQA();
         }
         normalizeRetrievalMode(routerResult);
-        log.info("[链路最终] 路由完成: sessionId={}, taskFamily={}, retrievalMode={}, needsClarification={}",
-                sessionId, routerResult.getTaskFamily(), routerResult.getRetrievalMode(), routerResult.getNeedsClarification());
 
         TaskFamily taskFamily = TaskFamily.valueOf(routerResult.getTaskFamily());
         boolean directAnswer = "NONE".equalsIgnoreCase(routerResult.getRetrievalMode());
-
         FSMContext fsmContext = FSMContext.builder()
                 .routerResult(routerResult)
                 .needsClarification(routerResult.getNeedsClarification())
@@ -84,25 +185,12 @@ public class LLMOrchestrator {
                 .build();
 
         ConversationState nextAfterRoute = conversationFSM.nextState(ConversationState.ROUTE, fsmContext);
-        String routeReason;
-        if (Boolean.TRUE.equals(routerResult.getNeedsClarification())) {
-            routeReason = "需要澄清参数";
-        } else if (directAnswer) {
-            routeReason = "无需检索直接回答";
-        } else if (requiresPlanner(taskFamily)) {
-            routeReason = "复杂任务需要规划";
-        } else {
-            routeReason = "默认进入检索";
-        }
-        log.info("[fsm] 路由决策FLOW|agent|fsm|from=ROUTE|to={}|reason={}|next={}",
-                nextAfterRoute,
-                routeReason,
-                nextAfterRoute == ConversationState.NEED_CLARIFY ? "Clarification" :
-                        (nextAfterRoute == ConversationState.PLAN ? "Planner" : "Workflow"));
-        transitionState(sessionState, nextAfterRoute);
+        log.info("[fsm-step-02] 路由决策: sessionId={}, turnId={}, taskFamily={}, retrievalMode={}, next={}",
+                sessionId, turnId, taskFamily, routerResult.getRetrievalMode(), nextAfterRoute);
+        transitionState(sessionState, nextAfterRoute, turnId);
 
         if (nextAfterRoute == ConversationState.NEED_CLARIFY) {
-            return buildClarificationResponse(sessionState, routerResult);
+            return buildClarificationResponse(sessionState, routerResult, turnId);
         }
 
         WorkflowContext workflowContext = WorkflowContext.builder()
@@ -118,85 +206,56 @@ public class LLMOrchestrator {
         }
 
         if (nextAfterRoute == ConversationState.BUILD_EVIDENCE && directAnswer) {
-            log.info("[fsm] 进入证据构建FLOW|agent|fsm|from={}|to=BUILD_EVIDENCE|reason=无需检索直答|next=EvidenceCheck",
-                    sessionState.getConversationState());
-            transitionState(sessionState, ConversationState.BUILD_EVIDENCE);
-
-            WorkflowDefinition directWorkflow = buildDirectWorkflow(routerResult.getTaskFamily(), routerResult.getRetrievalMode());
-            // 调用点注释：直答链路只执行 llm_generate，不会进入 retrieve_news。
+            if (sessionState.getConversationState() != ConversationState.BUILD_EVIDENCE) {
+                transitionState(sessionState, ConversationState.BUILD_EVIDENCE, turnId);
+            }
+            WorkflowDefinition directWorkflow = buildDirectWorkflow(
+                    routerResult.getTaskFamily(),
+                    routerResult.getRetrievalMode()
+            );
             workflowOrchestrator.executeWorkflow(directWorkflow, workflowContext);
         } else {
             boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
-            log.info("[链路最终] 执行策略: sessionId={}, usePlanner={}, taskFamily={}", sessionId, usePlanner, taskFamily);
-
             if (usePlanner) {
                 if (sessionState.getConversationState() != ConversationState.PLAN) {
-                    log.info("[fsm] 进入规划阶段FLOW|agent|fsm|from={}|to=PLAN|reason=复杂任务或路由要求|next=Planner",
-                            sessionState.getConversationState());
-                    transitionState(sessionState, ConversationState.PLAN);
+                    transitionState(sessionState, ConversationState.PLAN, turnId);
                 }
-
-                // 调用点注释：Planner 返回可执行 Plan（任务序列），不是直接执行结果。
                 Plan plan = plannerClient.plan(request.getQuery(), routerResult);
                 if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
                     plan = buildDefaultPlan(taskFamily, request.getQuery());
                 }
-                int planTaskCount = plan.getTasks() != null ? plan.getTasks().size() : 0;
-                log.info("[链路最终] 规划结果: sessionId={}, taskCount={}", sessionId, planTaskCount);
-
                 fsmContext.setPlan(plan);
                 ConversationState nextAfterPlan = conversationFSM.nextState(ConversationState.PLAN, fsmContext);
-                log.info("[fsm] 规划后状态FLOW|agent|fsm|from=PLAN|to={}|reason=计划已生成|next=Workflow", nextAfterPlan);
-                transitionState(sessionState, nextAfterPlan);
-
-                // 调用点注释：执行 Plan 时，RETRIEVE 任务会在 WorkflowOrchestrator 中映射到 retrieve_news。
+                transitionState(sessionState, nextAfterPlan, turnId);
                 workflowOrchestrator.executePlan(plan, workflowContext);
             } else {
                 if (sessionState.getConversationState() != ConversationState.RETRIEVE) {
-                    log.info("[fsm] 进入检索阶段FLOW|agent|fsm|from={}|to=RETRIEVE|reason=无需规划|next=Workflow",
-                            sessionState.getConversationState());
-                    transitionState(sessionState, ConversationState.RETRIEVE);
+                    transitionState(sessionState, ConversationState.RETRIEVE, turnId);
                 }
-
                 String workflowId = resolveWorkflowId(taskFamily);
                 if (workflowOrchestrator.hasWorkflow(workflowId)) {
-                    // 调用点注释：QA_WORKFLOW 的第一步是 qa-retrieve -> retrieve_news。
                     workflowOrchestrator.executeWorkflow(workflowId, workflowContext);
                 } else {
                     Plan fallbackPlan = buildDefaultPlan(taskFamily, request.getQuery());
-                    // 调用点注释：未命中内置工作流时回退到默认 Plan。
                     workflowOrchestrator.executePlan(fallbackPlan, workflowContext);
                 }
             }
         }
 
-        log.info("[链路最终] 检索结束: sessionId={}, evidenceCount={}", sessionId, workflowContext.getEvidence().size());
-
         fsmContext.setEvidenceCount(workflowContext.getEvidence().size());
-        log.info("[fsm] 进入证据构建FLOW|agent|fsm|from={}|to=BUILD_EVIDENCE|reason=检索结束|next=EvidenceCheck",
-                sessionState.getConversationState());
-        transitionState(sessionState, ConversationState.BUILD_EVIDENCE);
+        if (sessionState.getConversationState() != ConversationState.BUILD_EVIDENCE) {
+            transitionState(sessionState, ConversationState.BUILD_EVIDENCE, turnId);
+        }
 
         ConversationState nextAfterEvidence = conversationFSM.nextState(ConversationState.BUILD_EVIDENCE, fsmContext);
-        log.info("[fsm] 证据判断FLOW|agent|fsm|from=BUILD_EVIDENCE|to={}|reason=evidenceCount={}|next={}",
-                nextAfterEvidence,
-                workflowContext.getEvidence().size(),
-                nextAfterEvidence == ConversationState.GENERATE ? "Generate" : "Retrieve");
-        transitionState(sessionState, nextAfterEvidence);
+        transitionState(sessionState, nextAfterEvidence, turnId);
 
-        if (nextAfterEvidence == ConversationState.GENERATE) {
-            log.info("[fsm] 进入生成校验FLOW|agent|fsm|from=GENERATE|to=VALIDATE|reason=证据充足|next=Validate",
-                    sessionState.getConversationState());
-            transitionState(sessionState, ConversationState.VALIDATE);
+        if (nextAfterEvidence == ConversationState.GENERATE
+                && sessionState.getConversationState() != ConversationState.VALIDATE) {
+            transitionState(sessionState, ConversationState.VALIDATE, turnId);
         }
 
         PipelineResult pipelineResult = buildPipelineResultFromWorkflow(workflowContext);
-        int answerLength = pipelineResult.getAnswer() != null ? pipelineResult.getAnswer().length() : 0;
-        int candidateCount = pipelineResult.getCandidateIds() != null ? pipelineResult.getCandidateIds().size() : 0;
-        int citationCount = pipelineResult.getCitations() != null ? pipelineResult.getCitations().size() : 0;
-        log.info("[链路最终] 生成结果: sessionId={}, answerLength={}, candidateCount={}, citationCount={}",
-                sessionId, answerLength, candidateCount, citationCount);
-
         sessionManager.consumeBudget(sessionId, pipelineResult.getLlmCallCount());
 
         PipelineContext context = PipelineContext.builder()
@@ -211,22 +270,39 @@ public class LLMOrchestrator {
         }
         sessionManager.addHistory(sessionId, "Agent: " + response.getAnswer());
 
-        log.info("[fsm] 对话结束FLOW|agent|fsm|from={}|to=DONE|reason=响应已生成|next=结束",
-                sessionState.getConversationState());
-        transitionState(sessionState, ConversationState.DONE);
-        log.info("[链路最终] 响应完成: sessionId={}, taskFamily={}", sessionId, taskFamily);
-
+        transitionState(sessionState, ConversationState.DONE, turnId);
         return response;
     }
 
     private SessionState getOrCreateSession(ChatRequest request, String userId) {
-        if (request.getSessionId() != null) {
+        if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
             SessionState existing = sessionManager.getSession(request.getSessionId());
             if (existing != null) {
                 return existing;
             }
         }
         return sessionManager.createSession(userId);
+    }
+
+    private String resolveTurnId(ChatRequest request) {
+        if (request.getTurnId() != null && !request.getTurnId().isBlank()) {
+            return request.getTurnId();
+        }
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String resolveIdempotencyKey(ChatRequest request, String sessionId, String turnId) {
+        if (request.getIdempotencyKey() != null && !request.getIdempotencyKey().isBlank()) {
+            return request.getIdempotencyKey();
+        }
+        // 未传时退化为 session+turn，保持当前调用方兼容。
+        return sessionId + ":" + turnId;
+    }
+
+    private String buildRequestHash(ChatRequest request) {
+        String query = request.getQuery() == null ? "" : request.getQuery();
+        String raw = request.getSessionId() + "|" + query + "|" + request.getUserId();
+        return Integer.toHexString(raw.hashCode());
     }
 
     private boolean requiresPlanner(TaskFamily taskFamily) {
@@ -335,10 +411,13 @@ public class LLMOrchestrator {
         return List.of(String.valueOf(raw));
     }
 
-    private AgentResponse buildBudgetExhaustedResponse(SessionState sessionState) {
+    private AgentResponse buildBudgetExhaustedResponse(SessionState sessionState, String turnId) {
         return AgentResponse.builder()
                 .sessionId(sessionState.getSessionId())
-                .answer("抱歉，当前会话预算已耗尽，请创建新会话继续对话。")
+                .turnId(turnId)
+                .turnStatus(TurnStatus.FAILED.name())
+                .errorCode("BUDGET_EXHAUSTED")
+                .answer("抱歉，当前会话预算已耗尽，请创建新会话后继续。")
                 .timestamp(LocalDateTime.now())
                 .metadata(AgentResponse.ResponseMetadata.builder()
                         .remainingBudget(0)
@@ -346,14 +425,70 @@ public class LLMOrchestrator {
                 .build();
     }
 
-    private AgentResponse buildClarificationResponse(SessionState sessionState, RouterResult routerResult) {
+    private AgentResponse buildClarificationResponse(SessionState sessionState, RouterResult routerResult, String turnId) {
         return AgentResponse.builder()
                 .sessionId(sessionState.getSessionId())
-                .answer("我需要更多信息才能回答您的问题。")
+                .turnId(turnId)
+                .turnStatus(TurnStatus.DONE.name())
+                .answer("我需要更多信息才能继续回答。")
                 .needsClarification(true)
                 .clarificationPrompt(routerResult.getClarificationQuestion())
                 .timestamp(LocalDateTime.now())
                 .build();
+    }
+
+    private AgentResponse buildBusyResponse(String sessionId, String turnId, String runningTurnId) {
+        return AgentResponse.builder()
+                .sessionId(sessionId)
+                .turnId(turnId)
+                .turnStatus(TurnStatus.BUSY.name())
+                .errorCode("SESSION_BUSY")
+                .runningTurnId(runningTurnId)
+                .answer("当前会话正在处理中，请稍后重试。")
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    private AgentResponse buildIdempotencyInProgressResponse(String sessionId,
+                                                             String requestTurnId,
+                                                             IdempotencyRecord record) {
+        String processingTurnId = record.getTurnId() != null ? record.getTurnId() : requestTurnId;
+        return AgentResponse.builder()
+                .sessionId(sessionId)
+                .turnId(processingTurnId)
+                .turnStatus(TurnStatus.RUNNING.name())
+                .errorCode("IDEMPOTENCY_IN_PROGRESS")
+                .runningTurnId(processingTurnId)
+                .answer("请求正在处理中，请稍后重试。")
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    private AgentResponse replayFromIdempotencyRecord(String sessionId,
+                                                      String requestTurnId,
+                                                      IdempotencyRecord record) {
+        if (record == null || record.getStatus() == null) {
+            return null;
+        }
+        if (record.getStatus() == IdempotencyStatus.IN_PROGRESS) {
+            return buildIdempotencyInProgressResponse(sessionId, requestTurnId, record);
+        }
+        AgentResponse snapshot = record.getResponseSnapshot();
+        if (snapshot == null) {
+            return null;
+        }
+        if (snapshot.getSessionId() == null || snapshot.getSessionId().isBlank()) {
+            snapshot.setSessionId(sessionId);
+        }
+        if (snapshot.getTurnId() == null || snapshot.getTurnId().isBlank()) {
+            snapshot.setTurnId(record.getTurnId() != null ? record.getTurnId() : requestTurnId);
+        }
+        if (snapshot.getTurnStatus() == null || snapshot.getTurnStatus().isBlank()) {
+            snapshot.setTurnStatus(record.getStatus() == IdempotencyStatus.DONE
+                    ? TurnStatus.DONE.name()
+                    : TurnStatus.FAILED.name());
+        }
+        return snapshot;
     }
 
     private Map<String, Object> buildFilters(RouterResult routerResult) {
@@ -403,12 +538,12 @@ public class LLMOrchestrator {
                 && retrievalMode != null
                 && !"NONE".equalsIgnoreCase(retrievalMode)
                 && !"HYBRID".equalsIgnoreCase(retrievalMode)) {
-            log.info("[链路最终] 检索模式归一化: intentScope=NEWS, oldMode={}, newMode=HYBRID", retrievalMode);
+            log.info("[router] 检索模式归一化: intentScope=NEWS, oldMode={}, newMode=HYBRID", retrievalMode);
             routerResult.setRetrievalMode("HYBRID");
         }
     }
 
-    private void transitionState(SessionState sessionState, ConversationState target) {
+    private void transitionState(SessionState sessionState, ConversationState target, String turnId) {
         if (sessionState == null || target == null) {
             return;
         }
@@ -417,11 +552,25 @@ public class LLMOrchestrator {
             conversationFSM.validateTransition(current, target);
             sessionManager.updateConversationState(sessionState.getSessionId(), target);
             sessionState.setConversationState(target);
-            log.info("[fsm] FSM 过渡: sessionId={}, from={}, to={}", sessionState.getSessionId(), current, target);
+            turnManager.updateFsmState(sessionState.getSessionId(), turnId, target);
+            log.info("[fsm] 状态迁移成功: sessionId={}, turnId={}, from={}, to={}",
+                    sessionState.getSessionId(), turnId, current, target);
         } catch (Exception e) {
             sessionManager.updateConversationState(sessionState.getSessionId(), ConversationState.FAIL_SAFE);
             sessionState.setConversationState(ConversationState.FAIL_SAFE);
-            log.warn("[fsm] FSM 过渡被拒绝: {} -> {}, error={}", current, target, e.getMessage());
+            turnManager.updateFsmState(sessionState.getSessionId(), turnId, ConversationState.FAIL_SAFE);
+            log.warn("[fsm] 状态迁移失败，进入 FAIL_SAFE: sessionId={}, turnId={}, from={}, to={}, error={}",
+                    sessionState.getSessionId(), turnId, current, target, e.getMessage());
         }
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 }
