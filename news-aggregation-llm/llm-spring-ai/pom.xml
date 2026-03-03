@@ -16,37 +16,25 @@
     <description>Spring AI LLM Integration Module</description>
     <packaging>jar</packaging>
     <dependencies>
-        <!-- Vector Database Module -->
+        <!-- Internal Modules -->
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-vector</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
         
-        <!-- Elasticsearch Module -->
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-es</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
-        <!-- Embedding Module -->
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-embedding</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
         <dependency>
             <groupId>com.example</groupId>
             <artifactId>news-aggregation-base</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-        </dependency>
-
-        <!-- Spring Boot Starter -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
         </dependency>
         
         <!-- Spring Boot Web -->
@@ -59,7 +47,6 @@
         <dependency>
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-agent-framework</artifactId>
-            <version>${spring-ai-alibaba.version}</version>
         </dependency>
         
         <!-- Spring AI Alibaba Starter DashScope (包含ChatModel) -->

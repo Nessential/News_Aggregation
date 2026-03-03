@@ -1,6 +1,5 @@
 package com.example.news.aggregation.agent.domain;
 
-import com.example.news.aggregation.agent.enums.ConversationState;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -15,7 +14,7 @@ import java.util.List;
 /**
  * 会话状态。
  * <p>
- * 保存用户会话级长期上下文，不承载单轮执行中的瞬时状态。
+ * 保存用户会话级长期上下文，不承载单轮 FSM 执行状态。
  */
 @Data
 @Builder
@@ -31,10 +30,6 @@ public class SessionState implements Serializable {
 
     /** 用户ID */
     private String userId;
-
-    /** 当前会话状态（兼容字段，单轮状态以 TurnState 为准） */
-    @Builder.Default
-    private ConversationState conversationState = ConversationState.START;
 
     /** 当前正在执行的轮次ID，用于会话内并发控制 */
     private String activeTurnId;
@@ -99,4 +94,3 @@ public class SessionState implements Serializable {
         return budget != null && budget <= 0;
     }
 }
-

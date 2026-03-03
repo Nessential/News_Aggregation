@@ -3,6 +3,10 @@ spring:
     name: news-aggregation-app
   config:
     import:
+      # 允许从 .env 加载 key=value 配置（按工作目录兼容多路径）
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+      - optional:file:../../.env[.properties]
       - classpath:base.yml
       - classpath:datasource.yml
       - classpath:cache.yml

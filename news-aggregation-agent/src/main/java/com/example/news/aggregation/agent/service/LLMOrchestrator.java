@@ -7,6 +7,7 @@ import com.example.news.aggregation.agent.domain.IdempotencyRecord;
 import com.example.news.aggregation.agent.domain.PipelineContext;
 import com.example.news.aggregation.agent.domain.PipelineResult;
 import com.example.news.aggregation.agent.domain.SessionState;
+import com.example.news.aggregation.agent.domain.TurnState;
 import com.example.news.aggregation.agent.dto.ChatRequest;
 import com.example.news.aggregation.agent.enums.ConversationState;
 import com.example.news.aggregation.agent.enums.IdempotencyStatus;
@@ -113,8 +114,6 @@ public class LLMOrchestrator {
 
             // 步骤5：创建运行中 turn，并将本轮 FSM 起点重置到 START。
             turnManager.createRunningTurn(sessionId, turnId, requestHash);
-            sessionManager.updateConversationState(sessionId, ConversationState.START);
-            sessionState.setConversationState(ConversationState.START);
 
             AgentResponse response = executeSingleTurn(request, sessionState, turnId);
             response.setSessionId(sessionId);
@@ -154,6 +153,7 @@ public class LLMOrchestrator {
 
     private AgentResponse executeSingleTurn(ChatRequest request, SessionState sessionState, String turnId) {
         String sessionId = sessionState.getSessionId();
+        ConversationState currentFsmState = getCurrentTurnFsmState(sessionId, turnId);
 
         if (sessionState.isBudgetExhausted()) {
             return buildBudgetExhaustedResponse(sessionState, turnId);
@@ -162,8 +162,8 @@ public class LLMOrchestrator {
         sessionManager.addHistory(sessionId, "User: " + request.getQuery());
 
         log.info("[fsm-step-01] 进入路由: sessionId={}, turnId={}, from={}, to={}",
-                sessionId, turnId, sessionState.getConversationState(), ConversationState.ROUTE);
-        transitionState(sessionState, ConversationState.ROUTE, turnId);
+                sessionId, turnId, currentFsmState, ConversationState.ROUTE);
+        currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.ROUTE);
 
         RouterResult routerResult = routerClient.route(
                 sessionId,
@@ -187,7 +187,7 @@ public class LLMOrchestrator {
         ConversationState nextAfterRoute = conversationFSM.nextState(ConversationState.ROUTE, fsmContext);
         log.info("[fsm-step-02] 路由决策: sessionId={}, turnId={}, taskFamily={}, retrievalMode={}, next={}",
                 sessionId, turnId, taskFamily, routerResult.getRetrievalMode(), nextAfterRoute);
-        transitionState(sessionState, nextAfterRoute, turnId);
+        currentFsmState = transitionState(sessionId, turnId, currentFsmState, nextAfterRoute);
 
         if (nextAfterRoute == ConversationState.NEED_CLARIFY) {
             return buildClarificationResponse(sessionState, routerResult, turnId);
@@ -206,8 +206,8 @@ public class LLMOrchestrator {
         }
 
         if (nextAfterRoute == ConversationState.BUILD_EVIDENCE && directAnswer) {
-            if (sessionState.getConversationState() != ConversationState.BUILD_EVIDENCE) {
-                transitionState(sessionState, ConversationState.BUILD_EVIDENCE, turnId);
+            if (currentFsmState != ConversationState.BUILD_EVIDENCE) {
+                currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.BUILD_EVIDENCE);
             }
             WorkflowDefinition directWorkflow = buildDirectWorkflow(
                     routerResult.getTaskFamily(),
@@ -217,8 +217,8 @@ public class LLMOrchestrator {
         } else {
             boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
             if (usePlanner) {
-                if (sessionState.getConversationState() != ConversationState.PLAN) {
-                    transitionState(sessionState, ConversationState.PLAN, turnId);
+                if (currentFsmState != ConversationState.PLAN) {
+                    currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.PLAN);
                 }
                 Plan plan = plannerClient.plan(request.getQuery(), routerResult);
                 if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
@@ -226,11 +226,11 @@ public class LLMOrchestrator {
                 }
                 fsmContext.setPlan(plan);
                 ConversationState nextAfterPlan = conversationFSM.nextState(ConversationState.PLAN, fsmContext);
-                transitionState(sessionState, nextAfterPlan, turnId);
+                currentFsmState = transitionState(sessionId, turnId, currentFsmState, nextAfterPlan);
                 workflowOrchestrator.executePlan(plan, workflowContext);
             } else {
-                if (sessionState.getConversationState() != ConversationState.RETRIEVE) {
-                    transitionState(sessionState, ConversationState.RETRIEVE, turnId);
+                if (currentFsmState != ConversationState.RETRIEVE) {
+                    currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.RETRIEVE);
                 }
                 String workflowId = resolveWorkflowId(taskFamily);
                 if (workflowOrchestrator.hasWorkflow(workflowId)) {
@@ -243,16 +243,16 @@ public class LLMOrchestrator {
         }
 
         fsmContext.setEvidenceCount(workflowContext.getEvidence().size());
-        if (sessionState.getConversationState() != ConversationState.BUILD_EVIDENCE) {
-            transitionState(sessionState, ConversationState.BUILD_EVIDENCE, turnId);
+        if (currentFsmState != ConversationState.BUILD_EVIDENCE) {
+            currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.BUILD_EVIDENCE);
         }
 
         ConversationState nextAfterEvidence = conversationFSM.nextState(ConversationState.BUILD_EVIDENCE, fsmContext);
-        transitionState(sessionState, nextAfterEvidence, turnId);
+        currentFsmState = transitionState(sessionId, turnId, currentFsmState, nextAfterEvidence);
 
         if (nextAfterEvidence == ConversationState.GENERATE
-                && sessionState.getConversationState() != ConversationState.VALIDATE) {
-            transitionState(sessionState, ConversationState.VALIDATE, turnId);
+                && currentFsmState != ConversationState.VALIDATE) {
+            currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.VALIDATE);
         }
 
         PipelineResult pipelineResult = buildPipelineResultFromWorkflow(workflowContext);
@@ -270,7 +270,7 @@ public class LLMOrchestrator {
         }
         sessionManager.addHistory(sessionId, "Agent: " + response.getAnswer());
 
-        transitionState(sessionState, ConversationState.DONE, turnId);
+        transitionState(sessionId, turnId, currentFsmState, ConversationState.DONE);
         return response;
     }
 
@@ -543,25 +543,34 @@ public class LLMOrchestrator {
         }
     }
 
-    private void transitionState(SessionState sessionState, ConversationState target, String turnId) {
-        if (sessionState == null || target == null) {
-            return;
+    private ConversationState transitionState(String sessionId,
+                                              String turnId,
+                                              ConversationState current,
+                                              ConversationState target) {
+        if (sessionId == null || target == null) {
+            return current;
         }
-        ConversationState current = sessionState.getConversationState();
+        ConversationState source = current != null ? current : getCurrentTurnFsmState(sessionId, turnId);
         try {
-            conversationFSM.validateTransition(current, target);
-            sessionManager.updateConversationState(sessionState.getSessionId(), target);
-            sessionState.setConversationState(target);
-            turnManager.updateFsmState(sessionState.getSessionId(), turnId, target);
+            conversationFSM.validateTransition(source, target);
+            turnManager.updateFsmState(sessionId, turnId, target);
             log.info("[fsm] 状态迁移成功: sessionId={}, turnId={}, from={}, to={}",
-                    sessionState.getSessionId(), turnId, current, target);
+                    sessionId, turnId, source, target);
+            return target;
         } catch (Exception e) {
-            sessionManager.updateConversationState(sessionState.getSessionId(), ConversationState.FAIL_SAFE);
-            sessionState.setConversationState(ConversationState.FAIL_SAFE);
-            turnManager.updateFsmState(sessionState.getSessionId(), turnId, ConversationState.FAIL_SAFE);
+            turnManager.updateFsmState(sessionId, turnId, ConversationState.FAIL_SAFE);
             log.warn("[fsm] 状态迁移失败，进入 FAIL_SAFE: sessionId={}, turnId={}, from={}, to={}, error={}",
-                    sessionState.getSessionId(), turnId, current, target, e.getMessage());
+                    sessionId, turnId, source, target, e.getMessage());
+            return ConversationState.FAIL_SAFE;
         }
+    }
+
+    private ConversationState getCurrentTurnFsmState(String sessionId, String turnId) {
+        TurnState turnState = turnManager.getTurnState(sessionId, turnId);
+        if (turnState == null || turnState.getFsmState() == null) {
+            return ConversationState.START;
+        }
+        return turnState.getFsmState();
     }
 
     private String truncate(String text, int maxLen) {

@@ -103,15 +103,50 @@ public class NewsQueryController {
     @PostMapping("/by-ids")
     public ResponseEntity<ArticlesResponse> getByIds(@RequestBody IdsRequest request) {
         if (request == null || request.getIds() == null || request.getIds().isEmpty()) {
+            log.info("[DIAG][mysql][by-ids] empty request|idsCount=0");
             return ResponseEntity.ok(ArticlesResponse.builder().articles(Collections.emptyList()).build());
         }
+        log.info("[DIAG][mysql][by-ids] start|idsCount={} |idsSample={}",
+                request.getIds().size(), summarizeIds(request.getIds()));
 
         List<News> newsList = newsMapper.selectBatchIds(request.getIds());
         List<NewsArticleDto> articles = newsList.stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
+        log.info("[DIAG][mysql][by-ids] end|dbCount={} |articleCount={} |articleSample={}",
+                newsList.size(), articles.size(), summarizeArticles(articles));
 
         return ResponseEntity.ok(ArticlesResponse.builder().articles(articles).build());
+    }
+
+    private String summarizeIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return "[]";
+        }
+        return ids.stream()
+                .limit(5)
+                .map(String::valueOf)
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String summarizeArticles(List<NewsArticleDto> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return "[]";
+        }
+        return articles.stream()
+                .limit(3)
+                .map(item -> "{id=" + item.getId()
+                        + ",title=\"" + truncate(item.getTitle(), 30)
+                        + "\",source=\"" + truncate(item.getSource(), 20)
+                        + "\",publishedAt=" + item.getPublishedAt() + "}")
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     private NewsArticleDto toDto(News news) {

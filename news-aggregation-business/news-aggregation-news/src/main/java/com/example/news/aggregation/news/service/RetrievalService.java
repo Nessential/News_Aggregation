@@ -68,6 +68,8 @@ public class RetrievalService {
         Map<String, Object> activeFilters = new HashMap<>(esFilters);
         List<Map<String, Object>> esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
         List<RetrievalResultDto> mappedResults = mapEsResults(esResults);
+        log.info("[DIAG][retrieval][keyword] sample|phase=initial|rawSample={} |mappedSample={}",
+                summarizeEsRawHits(esResults), summarizeRetrievalResults(mappedResults));
         // Fallback-1: language filter is often over-strict when source language is persisted as 'en'.
         if (mappedResults.isEmpty() && activeFilters.containsKey("language")) {
             Object removed = activeFilters.remove("language");
@@ -75,6 +77,8 @@ public class RetrievalService {
                     removed, summarizeFilters(activeFilters));
             esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
             mappedResults = mapEsResults(esResults);
+            log.info("[DIAG][retrieval][keyword] sample|phase=fallback-language|rawSample={} |mappedSample={}",
+                    summarizeEsRawHits(esResults), summarizeRetrievalResults(mappedResults));
         }
         // Fallback-2: time window may be too narrow for current data.
         if (mappedResults.isEmpty() && activeFilters.containsKey("publication_time")) {
@@ -83,6 +87,8 @@ public class RetrievalService {
                     removed, summarizeFilters(activeFilters));
             esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
             mappedResults = mapEsResults(esResults);
+            log.info("[DIAG][retrieval][keyword] sample|phase=fallback-time-range|rawSample={} |mappedSample={}",
+                    summarizeEsRawHits(esResults), summarizeRetrievalResults(mappedResults));
         }
         // Fallback-3: clear all remaining filters for robust recall.
         if (mappedResults.isEmpty() && !activeFilters.isEmpty()) {
@@ -92,9 +98,11 @@ public class RetrievalService {
                     summarizeFilters(removed), summarizeFilters(activeFilters));
             esResults = searchEs(finalQuery, size, fields, activeFilters, sortBy);
             mappedResults = mapEsResults(esResults);
+            log.info("[DIAG][retrieval][keyword] sample|phase=fallback-clear-all|rawSample={} |mappedSample={}",
+                    summarizeEsRawHits(esResults), summarizeRetrievalResults(mappedResults));
         }
-        log.info("[DIAG][retrieval][keyword] end|index={} |esRawCount={} |mappedCount={}",
-                esProperties.getIndexName(), esResults.size(), mappedResults.size());
+        log.info("[DIAG][retrieval][keyword] end|index={} |esRawCount={} |mappedCount={} |finalSample={}",
+                esProperties.getIndexName(), esResults.size(), mappedResults.size(), summarizeRetrievalResults(mappedResults));
         return mappedResults;
     }
 
@@ -113,12 +121,32 @@ public class RetrievalService {
         double min = normalizeMinScore(minScore);
         FilterCriteria criteria = parseFilters(filters);
         String collectionName = resolveCollectionName(criteria);
-        float[] queryVector = embeddingService.embed(query);
+        float[] queryVector;
+        try {
+            queryVector = embeddingService.embed(query);
+        } catch (RuntimeException ex) {
+            log.warn("[DIAG][retrieval][vector] skip|reason=embedding-failed|collection={} |query={} |error={}",
+                    collectionName, querySummary(query), rootCauseMessage(ex));
+            return new ArrayList<>();
+        }
         Map<String, Object> vectorFilters = buildVectorFilters(criteria);
+        int vectorDim = queryVector != null ? queryVector.length : 0;
         log.info("[DIAG][retrieval][vector] start|query={} |topK={} |minScore={} |collection={} |language={} |filters={} |vectorDim={}",
-                querySummary(query), size, min, collectionName, criteria.getLanguage(), summarizeFilters(vectorFilters), queryVector.length);
-        List<SearchResult> rawResults = vectorStoreService.search(
-                collectionName, queryVector, size, vectorFilters);
+                querySummary(query), size, min, collectionName, criteria.getLanguage(), summarizeFilters(vectorFilters), vectorDim);
+
+        if (queryVector == null || queryVector.length == 0) {
+            log.warn("[DIAG][retrieval][vector] skip|reason=empty-query-vector|collection={} |query={}",
+                    collectionName, querySummary(query));
+            return new ArrayList<>();
+        }
+        if (vectorProperties.getVectorSize() > 0 && queryVector.length != vectorProperties.getVectorSize()) {
+            log.warn("[DIAG][retrieval][vector] skip|reason=vector-dim-mismatch|collection={} |expectedDim={} |actualDim={} |query={}",
+                    collectionName, vectorProperties.getVectorSize(), queryVector.length, querySummary(query));
+            return new ArrayList<>();
+        }
+
+        List<SearchResult> rawResults = safeVectorSearch(collectionName, queryVector, size, vectorFilters, "initial");
+        log.info("[DIAG][retrieval][vector] sample|phase=initial|rawSample={}", summarizeVectorRawHits(rawResults));
         VectorEvaluation evaluation = evaluateVectorResults(rawResults, min);
         int belowScoreCount = evaluation.getBelowScoreCount();
         int invalidIdCount = evaluation.getInvalidIdCount();
@@ -129,7 +157,9 @@ public class RetrievalService {
             Object removed = relaxed.remove("published_at");
             log.info("[DIAG][retrieval][vector] fallback|reason=empty-with-time-range|removedPublishedAt={} |retryFilters={}",
                     removed, summarizeFilters(relaxed));
-            rawResults = vectorStoreService.search(collectionName, queryVector, size, relaxed);
+            rawResults = safeVectorSearch(collectionName, queryVector, size, relaxed, "fallback-time-range");
+            log.info("[DIAG][retrieval][vector] sample|phase=fallback-time-range|rawSample={}",
+                    summarizeVectorRawHits(rawResults));
             evaluation = evaluateVectorResults(rawResults, min);
             belowScoreCount = evaluation.getBelowScoreCount();
             invalidIdCount = evaluation.getInvalidIdCount();
@@ -146,8 +176,9 @@ public class RetrievalService {
             invalidIdSamples = evaluation.getInvalidIdSamples();
             mappedResults = evaluation.getMappedResults();
         }
-        log.info("[DIAG][retrieval][vector] end|collection={} |rawCount={} |belowScoreCount={} |invalidIdCount={} |invalidIdSamples={} |finalCount={}",
-                collectionName, rawResults.size(), belowScoreCount, invalidIdCount, invalidIdSamples, mappedResults.size());
+        log.info("[DIAG][retrieval][vector] end|collection={} |rawCount={} |belowScoreCount={} |invalidIdCount={} |invalidIdSamples={} |finalCount={} |finalSample={}",
+                collectionName, rawResults.size(), belowScoreCount, invalidIdCount, invalidIdSamples, mappedResults.size(),
+                summarizeRetrievalResults(mappedResults));
         return mappedResults;
     }
 
@@ -169,7 +200,14 @@ public class RetrievalService {
         int expandedKeywordCount = criteria.getExpandedKeywords() != null ? criteria.getExpandedKeywords().size() : 0;
         log.info("[DIAG][retrieval][hybrid] start|query={} |topK={} |minScore={} |keywordCount={} |expandedKeywordCount={} |filters={}",
                 querySummary(query), size, min, keywordCount, expandedKeywordCount, summarizeFilters(filters));
-        List<RetrievalResultDto> vectorResults = vectorSearch(query, size, min, filters);
+        List<RetrievalResultDto> vectorResults;
+        try {
+            vectorResults = vectorSearch(query, size, min, filters);
+        } catch (RuntimeException ex) {
+            log.warn("[DIAG][retrieval][hybrid] fallback|reason=vector-search-unavailable|query={} |filters={} |error={}",
+                    querySummary(query), summarizeFilters(filters), rootCauseMessage(ex));
+            vectorResults = new ArrayList<>();
+        }
         List<RetrievalResultDto> keywordResults = keywordSearch(query, size, filters);
         List<RetrievalResultDto> fused = rrfFusion(List.of(vectorResults, keywordResults), size);
         List<RetrievalResultDto> deduped = deduplicate(fused, size);
@@ -188,8 +226,9 @@ public class RetrievalService {
         String dedupRatio = fused.isEmpty()
                 ? "1.00"
                 : String.format(Locale.ROOT, "%.2f", (double) deduped.size() / (double) fused.size());
-        log.info("[DIAG][retrieval][hybrid] end|vectorCount={} |keywordCount={} |bothHitCount={} |vectorOnlyCount={} |keywordOnlyCount={} |fusedCount={} |dedupedCount={} |dedupRatio={}",
-                vectorResults.size(), keywordResults.size(), bothHitCount, vectorOnlyCount, keywordOnlyCount, fused.size(), deduped.size(), dedupRatio);
+        log.info("[DIAG][retrieval][hybrid] end|vectorCount={} |keywordCount={} |bothHitCount={} |vectorOnlyCount={} |keywordOnlyCount={} |fusedCount={} |dedupedCount={} |dedupRatio={} |vectorSample={} |keywordSample={} |dedupSample={}",
+                vectorResults.size(), keywordResults.size(), bothHitCount, vectorOnlyCount, keywordOnlyCount, fused.size(), deduped.size(), dedupRatio,
+                summarizeRetrievalResults(vectorResults), summarizeRetrievalResults(keywordResults), summarizeRetrievalResults(deduped));
         return deduped;
     }
 
@@ -668,7 +707,11 @@ public class RetrievalService {
                                                List<String> fields,
                                                Map<String, Object> filters,
                                                String sortBy) {
-        return elasticsearchService.search(esProperties.getIndexName(), query, size, fields, filters, sortBy);
+        List<Map<String, Object>> results = elasticsearchService.search(esProperties.getIndexName(), query, size, fields, filters, sortBy);
+        if (results == null) {
+            return new ArrayList<>();
+        }
+        return results;
     }
 
     private List<RetrievalResultDto> mapEsResults(List<Map<String, Object>> esResults) {
@@ -743,6 +786,110 @@ public class RetrievalService {
             return "";
         }
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private List<SearchResult> normalizeVectorResults(List<SearchResult> rawResults) {
+        return rawResults != null ? rawResults : new ArrayList<>();
+    }
+
+    private List<SearchResult> safeVectorSearch(String collectionName,
+                                                float[] queryVector,
+                                                int topK,
+                                                Map<String, Object> filters,
+                                                String phase) {
+        try {
+            return normalizeVectorResults(vectorStoreService.search(collectionName, queryVector, topK, filters));
+        } catch (RuntimeException ex) {
+            log.warn("[DIAG][retrieval][vector] fallback|phase={} |reason=vector-search-failed|collection={} |topK={} |vectorDim={} |filters={} |error={}",
+                    phase, collectionName, topK, queryVector != null ? queryVector.length : 0, summarizeFilters(filters), rootCauseMessage(ex));
+            if (filters == null || filters.isEmpty()) {
+                return new ArrayList<>();
+            }
+        }
+
+        try {
+            List<SearchResult> retried = normalizeVectorResults(
+                    vectorStoreService.search(collectionName, queryVector, topK, new HashMap<>()));
+            log.info("[DIAG][retrieval][vector] fallback|phase={} |reason=retry-without-filter|collection={} |retryRawCount={}",
+                    phase, collectionName, retried.size());
+            return retried;
+        } catch (RuntimeException retryEx) {
+            log.error("[DIAG][retrieval][vector] fallback-failed|phase={} |collection={} |error={}",
+                    phase, collectionName, rootCauseMessage(retryEx));
+            return new ArrayList<>();
+        }
+    }
+
+    private String rootCauseMessage(Throwable throwable) {
+        if (throwable == null) {
+            return "";
+        }
+        Throwable root = throwable;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getClass().getSimpleName() + ": " + String.valueOf(root.getMessage());
+    }
+
+    private String summarizeRetrievalResults(List<RetrievalResultDto> results) {
+        if (results == null || results.isEmpty()) {
+            return "[]";
+        }
+        return results.stream()
+                .limit(3)
+                .map(item -> {
+                    Long id = item.getArticleId();
+                    Double score = item.getScore();
+                    String snippet = item.getSnippet();
+                    String snippetSummary = snippet == null ? "null" : truncate(snippet.replaceAll("\\s+", " "), 40);
+                    return "{id=" + id + ",score=" + String.format(Locale.ROOT, "%.4f", score != null ? score : 0.0d)
+                            + ",snippet=\"" + snippetSummary + "\"}";
+                })
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String summarizeEsRawHits(List<Map<String, Object>> results) {
+        if (results == null || results.isEmpty()) {
+            return "[]";
+        }
+        return results.stream()
+                .limit(3)
+                .map(item -> {
+                    Long id = parseId(item.get("_id"));
+                    Object scoreObj = item.get("_score");
+                    double score = scoreObj instanceof Number ? ((Number) scoreObj).doubleValue() : 0.0d;
+                    String title = null;
+                    Object sourceObj = item.get("_source");
+                    if (sourceObj instanceof Map<?, ?> source) {
+                        title = firstNonEmpty(source.get("title_cn"), source.get("title"));
+                    }
+                    return "{id=" + id + ",score=" + String.format(Locale.ROOT, "%.4f", score)
+                            + ",title=\"" + truncate(title, 30) + "\"}";
+                })
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    private String summarizeVectorRawHits(List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "[]";
+        }
+        return results.stream()
+                .limit(3)
+                .map(item -> {
+                    Long id = resolveVectorArticleId(item);
+                    double score = item.getScore();
+                    String content = null;
+                    Map<String, Object> payload = item.getPayload();
+                    if (payload != null) {
+                        Object contentObj = payload.get("content");
+                        if (contentObj != null) {
+                            content = String.valueOf(contentObj);
+                        }
+                    }
+                    return "{id=" + id + ",score=" + String.format(Locale.ROOT, "%.4f", score)
+                            + ",content=\"" + truncate(content == null ? "" : content.replaceAll("\\s+", " "), 40) + "\"}";
+                })
+                .collect(Collectors.joining(", ", "[", "]"));
     }
 
     @Data
