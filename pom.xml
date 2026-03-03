@@ -125,6 +125,12 @@
 
             <dependency>
                 <groupId>com.example</groupId>
+                <artifactId>news-aggregation-embedding</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.example</groupId>
                 <artifactId>news-aggregation-cache</artifactId>
                 <version>${project.version}</version>
             </dependency>

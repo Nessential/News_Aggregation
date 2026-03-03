@@ -3,7 +3,6 @@ package com.example.news.aggregation.agent.service;
 import com.example.news.aggregation.agent.domain.Constraints;
 import com.example.news.aggregation.agent.domain.RetrievalAttempt;
 import com.example.news.aggregation.agent.domain.SessionState;
-import com.example.news.aggregation.agent.enums.ConversationState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -53,7 +52,6 @@ public class SessionManager {
         SessionState sessionState = SessionState.builder()
                 .sessionId(sessionId)
                 .userId(userId)
-                .conversationState(ConversationState.START)
                 .budget(10)
                 .createdAt(now)
                 .updatedAt(now)
@@ -140,22 +138,6 @@ public class SessionManager {
         }
         sessionState.updateCandidates(articleIds);
         saveSession(sessionState);
-    }
-
-    /**
-     * 更新会话状态。
-     */
-    public void updateConversationState(String sessionId, ConversationState newState) {
-        SessionState sessionState = getSession(sessionId);
-        if (sessionState == null) {
-            log.error("[session] 更新状态失败，会话不存在: sessionId={}", sessionId);
-            return;
-        }
-        ConversationState oldState = sessionState.getConversationState();
-        sessionState.setConversationState(newState);
-        sessionState.setUpdatedAt(LocalDateTime.now());
-        saveSession(sessionState);
-        log.info("[fsm] 会话状态迁移: sessionId={}, from={}, to={}", sessionId, oldState, newState);
     }
 
     /**
@@ -302,4 +284,3 @@ public class SessionManager {
         }
     }
 }
-

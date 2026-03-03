@@ -1,4 +1,4 @@
-# RSS源配置
+# RSS 源配置
 news:
   rss:
     sources:
@@ -13,20 +13,49 @@ translate:
     secret-key: ${news.aggregation.translate.baidu.secret-key}
     api-url: https://fanyi-api.baidu.com/api/trans/vip/translate
 
-
-# Story 归簇配置
+# Story 归档配置
 story:
-  time-window-days: 7           # 时间窗口（天）
+  time-window-days: 7            # 时间窗口（天）
   similarity-threshold: 0.90     # 相似度阈值
 
 # Embedding 配置
 embedding:
-  chunk-size: 500               # chunk 大小（字符）
-  chunk-overlap: 50             # 重叠大小（字符）
-  min-chunk-size: 100           # 最小 chunk（字符）
+  chunk-size: 500                # chunk 大小（字符）
+  chunk-overlap: 50              # 重叠大小（字符）
+  min-chunk-size: 100            # 最小 chunk（字符）
 
 # Qdrant 配置
 vector:
   host: localhost
   port: 6333
   vector-size: 2048
+
+# 短信认证配置（阿里云 Dypnsapi）
+sms:
+  aliyun:
+    # 是否启用阿里云短信认证。false 时走本地调试验证码（mock-code）
+    enabled: true
+    # 阿里云 Dypnsapi endpoint
+    endpoint: ${SMS_ALIYUN_ENDPOINT:dypnsapi.aliyuncs.com}
+    # 短信验证码方案名称（请在阿里云控制台创建）
+    scheme-name: 登录/注册模板
+    # 短信签名
+    sign-name: ${SMS_ALIYUN_SIGN_NAME:速通互联验证码}
+    # 短信模板编码
+    template-code: ${SMS_ALIYUN_TEMPLATE_CODE:100001}
+    # 模板参数（JSON 字符串）
+    template-param: '${SMS_ALIYUN_TEMPLATE_PARAM:{"code":"##code##","min":"5"}}'
+    # 国家码（中国大陆为 86）
+    country-code: ${SMS_ALIYUN_COUNTRY_CODE:86}
+    # 验证码位数
+    code-length: ${SMS_ALIYUN_CODE_LENGTH:6}
+    # 验证码有效期（秒）
+    valid-time-seconds: ${SMS_ALIYUN_VALID_TIME_SECONDS:60}
+    # 重发间隔（秒）
+    resend-interval-seconds: ${SMS_ALIYUN_RESEND_INTERVAL_SECONDS:60}
+    # 限流窗口大小（秒，令牌桶）
+    rate-limit-window-seconds: ${SMS_ALIYUN_RATE_LIMIT_WINDOW_SECONDS:60}
+    # 限流窗口内最大允许发送次数
+    rate-limit-max-requests: ${SMS_ALIYUN_RATE_LIMIT_MAX_REQUESTS:1}
+    # 本地调试模式固定验证码
+    mock-code: ${SMS_ALIYUN_MOCK_CODE:123456}

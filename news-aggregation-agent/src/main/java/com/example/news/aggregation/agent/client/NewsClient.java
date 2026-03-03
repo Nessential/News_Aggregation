@@ -36,18 +36,49 @@ public class NewsClient {
                 .ids(ids)
                 .build();
         try {
-            log.info("[client] 批量拉取文章FLOW|agent|client=news|step=start|url={}|idsCount={}|next=News服务",
-                    url, ids != null ? ids.size() : 0);
+            log.info("[client] 批量拉取文章FLOW|agent|client=news|step=start|url={}|idsCount={}|idsSample={}|next=News服务",
+                    url, ids != null ? ids.size() : 0, summarizeIds(ids));
             ResponseEntity<ArticlesResponse> response = restTemplate.postForEntity(
                     url, request, ArticlesResponse.class);
             ArticlesResponse body = response.getBody();
             int count = body != null && body.getArticles() != null ? body.getArticles().size() : 0;
-            log.info("[client] 批量拉取文章完成FLOW|agent|client=news|step=end|count={}|next=候选组装", count);
+            log.info("[client] 批量拉取文章完成FLOW|agent|client=news|step=end|count={}|sample={}|next=候选组装",
+                    count, summarizeArticles(body != null ? body.getArticles() : null));
             return body != null && body.getArticles() != null ? body.getArticles() : new ArrayList<>();
         } catch (Exception e) {
             log.warn("NewsClient request failed, error={}", e.getMessage());
             return new ArrayList<>();
         }
+    }
+
+    private String summarizeIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return "[]";
+        }
+        return ids.stream()
+                .limit(5)
+                .map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(", ", "[", "]"));
+    }
+
+    private String summarizeArticles(List<NewsArticleDto> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return "[]";
+        }
+        return articles.stream()
+                .limit(3)
+                .map(article -> "{id=" + article.getId()
+                        + ",title=\"" + truncate(article.getTitle(), 30)
+                        + "\",source=\"" + truncate(article.getSource(), 20)
+                        + "\",publishedAt=" + article.getPublishedAt() + "}")
+                .collect(java.util.stream.Collectors.joining(", ", "[", "]"));
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     @Data
