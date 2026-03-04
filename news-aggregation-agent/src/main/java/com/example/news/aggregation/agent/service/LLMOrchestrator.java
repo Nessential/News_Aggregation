@@ -401,6 +401,14 @@ public class LLMOrchestrator {
 
         String answer = workflowContext.getAttributes().getOrDefault("answer", "").toString();
         List<String> citations = extractCitations(workflowContext.getAttributes().get("citations"));
+        Map<String, Object> extraData = buildExecutionObservabilityData(workflowContext);
+        log.info("[orchestrator] 工作流结果汇总：candidateCount={}, citationCount={}, qualityGate={}, warningCount={}, schemaVersion={}, semanticVersion={}",
+                candidateIds.size(),
+                citations.size(),
+                extraData.getOrDefault("qualityGateTriggered", false),
+                extraData.getOrDefault("qualityWarningCount", 0),
+                extraData.getOrDefault("executionSchemaVersion", ""),
+                extraData.getOrDefault("executionSemanticVersion", ""));
 
         return PipelineResult.builder()
                 .answer(answer)
@@ -409,7 +417,28 @@ public class LLMOrchestrator {
                 .llmCallCount(answer.isEmpty() ? 0 : 1)
                 .executionTimeMs(0L)
                 .success(true)
+                .extraData(extraData)
                 .build();
+    }
+
+    private Map<String, Object> buildExecutionObservabilityData(WorkflowContext workflowContext) {
+        Map<String, Object> data = new HashMap<>();
+        if (workflowContext == null || workflowContext.getAttributes() == null) {
+            return data;
+        }
+        Map<String, Object> attrs = workflowContext.getAttributes();
+        data.put("qualityGateTriggered", attrs.getOrDefault("workflow.quality.gate", false));
+        data.put("qualityWarningCount", attrs.getOrDefault("workflow.quality.warning.count", 0));
+        data.put("qualityWarnings", attrs.getOrDefault("workflow.quality.warnings", List.of()));
+        data.put("schemaValidationMode", attrs.getOrDefault("workflow.schema.validation.mode", ""));
+        data.put("executionSchemaVersion", attrs.getOrDefault("workflow.schema.version", ""));
+        data.put("executionSemanticVersion", attrs.getOrDefault("workflow.semantic.version", ""));
+        data.put("inputValidationCount", attrs.getOrDefault("workflow.validation.input.checked.count", 0));
+        data.put("outputValidationCount", attrs.getOrDefault("workflow.validation.output.checked.count", 0));
+        data.put("degradeOutputTriggered", attrs.getOrDefault("workflow.degrade.required", false));
+        data.put("degradeReasonCode", attrs.getOrDefault("workflow.degrade.reason", ""));
+        data.put("degradeStepId", attrs.getOrDefault("workflow.degrade.stepId", ""));
+        return data;
     }
 
     @SuppressWarnings("unchecked")

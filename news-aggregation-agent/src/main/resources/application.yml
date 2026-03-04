@@ -88,6 +88,26 @@ app:
     execution:
       schema-version: execution-plan/1.0
       semantic-version: 1.0.0
+    schema-validation:
+      enabled: true
+      mode: STRICT
+      default-schema-version: execution-plan/1.0
+      supported-schema-versions:
+        - execution-plan/1.0
+      compatibility-tools: []
+      optional-output-fields-by-tool:
+        llm_generate:
+          - citations
+      global-max-retries: 2
+      tool-default-max-retries:
+        search_news: 2
+        retrieve_news: 2
+        llm_generate: 1
+      tool-default-fallbacks:
+        search_news:
+          - retrieve_news
+      global-fallback-tools: []
+      quality-gate-enabled: true
     # 会话管理
     session:
       # Session/Turn/幂等记录在 Redis 中的默认过期时间（分钟）

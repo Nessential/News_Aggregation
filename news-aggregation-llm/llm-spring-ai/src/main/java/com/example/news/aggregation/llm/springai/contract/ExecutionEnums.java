@@ -24,6 +24,7 @@ public final class ExecutionEnums {
         RETRY,
         FALLBACK_TOOL,
         REPLAN,
+        DEGRADE_OUTPUT,
         WAIT,
         ABORT
     }
@@ -48,4 +49,3 @@ public final class ExecutionEnums {
         APPLIED
     }
 }
-

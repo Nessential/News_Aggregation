@@ -68,6 +68,27 @@ public class AgentResponse implements Serializable {
         private String pipelineType;
         /** 会话剩余预算 */
         private Integer remainingBudget;
+        /** 是否触发质量门 */
+        private Boolean qualityGateTriggered;
+        /** 质量告警数量 */
+        private Integer qualityWarningCount;
+        /** 质量告警明细 */
+        private List<String> qualityWarnings;
+        /** Schema 校验模式 */
+        private String schemaValidationMode;
+        /** 执行计划 Schema 版本 */
+        private String executionSchemaVersion;
+        /** 执行计划语义版本 */
+        private String executionSemanticVersion;
+        /** 输入校验次数 */
+        private Integer inputValidationCount;
+        /** 输出校验次数 */
+        private Integer outputValidationCount;
+        /** 是否触发降级输出 */
+        private Boolean degradeOutputTriggered;
+        /** 降级原因码 */
+        private String degradeReasonCode;
+        /** 触发降级的步骤 ID */
+        private String degradeStepId;
     }
 }
-
