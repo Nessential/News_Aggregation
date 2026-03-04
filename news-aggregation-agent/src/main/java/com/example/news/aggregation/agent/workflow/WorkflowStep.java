@@ -29,4 +29,10 @@ public class WorkflowStep {
 
     /** 步骤参数 */
     private Map<String, Object> parameters;
+
+    /** 副作用标签（NONE/READ/WRITE/EXTERNAL） */
+    private String sideEffect;
+
+    /** 完成判定规则引用 */
+    private String doneCheckRef;
 }

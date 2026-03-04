@@ -2,8 +2,8 @@ package com.example.news.aggregation.agent.fsm;
 
 import com.example.news.aggregation.agent.domain.SessionState;
 import com.example.news.aggregation.agent.tool.dto.RetrievalResult;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
-import com.example.news.aggregation.llm.springai.contract.Plan;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -30,7 +30,7 @@ public class FSMContext {
     private RouterResult routerResult;
 
     /** 计划结果 */
-    private Plan plan;
+    private ExecutionPlan executionPlan;
 
     /** 生成草稿 */
     private GeneratorDraft draft;

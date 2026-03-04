@@ -2,7 +2,7 @@ package com.example.news.aggregation.llm.springai.controller;
 
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
 import com.example.news.aggregation.llm.springai.contract.GeneratorRequest;
-import com.example.news.aggregation.llm.springai.contract.Plan;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.PlanRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
@@ -35,8 +35,8 @@ public class GraphTestController {
     }
 
     @PostMapping("/plan")
-    public ResponseEntity<Plan> plan(@RequestBody PlanRequest request) {
-        Plan plan = plannerService.plan(request);
+    public ResponseEntity<ExecutionPlan> plan(@RequestBody PlanRequest request) {
+        ExecutionPlan plan = plannerService.plan(request);
         return ResponseEntity.ok(plan);
     }
 

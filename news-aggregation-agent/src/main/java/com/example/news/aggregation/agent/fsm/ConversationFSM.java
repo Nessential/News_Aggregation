@@ -21,9 +21,12 @@ public class ConversationFSM {
             Map.ofEntries(
                     Map.entry(ConversationState.START, List.of(ConversationState.ROUTE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.ROUTE, List.of(ConversationState.NEED_CLARIFY, ConversationState.PLAN,
-                            ConversationState.RETRIEVE, ConversationState.BUILD_EVIDENCE, ConversationState.FAIL_SAFE)),
-                    Map.entry(ConversationState.NEED_CLARIFY, List.of(ConversationState.ROUTE, ConversationState.DONE,
+                            ConversationState.RETRIEVE, ConversationState.BUILD_EVIDENCE,
+                            ConversationState.WAITING, ConversationState.FAIL_SAFE)),
+                    Map.entry(ConversationState.NEED_CLARIFY, List.of(ConversationState.WAITING, ConversationState.DONE,
                             ConversationState.FAIL_SAFE)),
+                    Map.entry(ConversationState.WAITING, List.of(ConversationState.ROUTE, ConversationState.PLAN,
+                            ConversationState.RETRIEVE, ConversationState.DONE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.PLAN, List.of(ConversationState.RETRIEVE, ConversationState.FAIL_SAFE)),
                     Map.entry(ConversationState.RETRIEVE, List.of(ConversationState.RERANK, ConversationState.BUILD_EVIDENCE,
                             ConversationState.EVIDENCE_INSUFFICIENT, ConversationState.FAIL_SAFE)),
@@ -56,8 +59,9 @@ public class ConversationFSM {
         return switch (current) {
             case START -> ConversationState.ROUTE;
             case ROUTE -> routeNext(context);
-            case NEED_CLARIFY -> ConversationState.DONE;
-            case PLAN -> context.getPlan() != null ? ConversationState.RETRIEVE : ConversationState.FAIL_SAFE;
+            case NEED_CLARIFY -> ConversationState.WAITING;
+            case WAITING -> waitingNext(context);
+            case PLAN -> context.getExecutionPlan() != null ? ConversationState.RETRIEVE : ConversationState.FAIL_SAFE;
             case RETRIEVE -> ConversationState.RERANK;
             case RERANK -> ConversationState.CANONICALIZE;
             case CANONICALIZE -> ConversationState.BUILD_EVIDENCE;
@@ -144,5 +148,18 @@ public class ConversationFSM {
             return ConversationState.DISPATCH_ASYNC;
         }
         return ConversationState.DONE;
+    }
+
+    private ConversationState waitingNext(FSMContext context) {
+        if (context == null) {
+            return ConversationState.ROUTE;
+        }
+        if (context.getExecutionPlan() != null) {
+            return ConversationState.PLAN;
+        }
+        if (context.getRouterResult() != null) {
+            return ConversationState.RETRIEVE;
+        }
+        return ConversationState.ROUTE;
     }
 }

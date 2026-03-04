@@ -25,4 +25,10 @@ public class PlanRequest {
 
     /** 额外上下文（可选） */
     private Map<String, Object> context;
+
+    /** 计划结构版本（可选） */
+    private String planSchema;
+
+    /** 语义版本（可选） */
+    private String semanticVersion;
 }
