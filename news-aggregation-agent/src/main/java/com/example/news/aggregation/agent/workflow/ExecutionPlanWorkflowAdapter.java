@@ -70,6 +70,12 @@ public class ExecutionPlanWorkflowAdapter {
                     .parameters(parameters)
                     .sideEffect(stepSemanticMapper.resolveSideEffect(step))
                     .doneCheckRef(stepSemanticMapper.resolveDoneCheckRef(step))
+                    .outputSchema(step.getOutputSchema())
+                    .doneCheck(step.getDoneCheck())
+                    .schemaVersion(plan.getSchemaVersion())
+                    .semanticVersion(plan.getSemanticVersion())
+                    .retryPolicy(step.getRetryPolicy())
+                    .failurePolicy(step.getFailurePolicy())
                     .build());
             log.info("[adapter] 步骤转换完成：stepId={}, stepType={}, capability={}, dependsOn={}",
                     step.getStepId(),

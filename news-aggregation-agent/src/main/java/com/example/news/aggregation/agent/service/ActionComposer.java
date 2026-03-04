@@ -47,14 +47,33 @@ public class ActionComposer {
             log.info("[链路最终] 候选文档数量FLOW|agent|node=action_compose|step=candidates|sessionId={}|count={}|next=元数据组装", sessionId, candidates.size());
 
             // 2. 组装元数据
+            Map<String, Object> extraData = pipelineResult.getExtraData();
             AgentResponse.ResponseMetadata metadata = AgentResponse.ResponseMetadata.builder()
                     .retrievedCount(pipelineResult.getCandidateIds() != null
                             ? pipelineResult.getCandidateIds().size() : 0)
                     .llmCallCount(pipelineResult.getLlmCallCount())
                     .pipelineType(determinePipelineType(taskFamily))
                     .remainingBudget(sessionState.getBudget())
+                    .qualityGateTriggered(readBoolean(extraData, "qualityGateTriggered", false))
+                    .qualityWarningCount(readInteger(extraData, "qualityWarningCount", 0))
+                    .qualityWarnings(readStringList(extraData, "qualityWarnings"))
+                    .schemaValidationMode(readString(extraData, "schemaValidationMode", ""))
+                    .executionSchemaVersion(readString(extraData, "executionSchemaVersion", ""))
+                    .executionSemanticVersion(readString(extraData, "executionSemanticVersion", ""))
+                    .inputValidationCount(readInteger(extraData, "inputValidationCount", 0))
+                    .outputValidationCount(readInteger(extraData, "outputValidationCount", 0))
+                    .degradeOutputTriggered(readBoolean(extraData, "degradeOutputTriggered", false))
+                    .degradeReasonCode(readString(extraData, "degradeReasonCode", ""))
+                    .degradeStepId(readString(extraData, "degradeStepId", ""))
                     .build();
-            log.info("[链路最终] 响应元数据组装FLOW|agent|node=action_compose|step=metadata|sessionId={}|retrievedCount={}|llmCallCount={}|pipelineType={}|next=最终响应", sessionId, metadata.getRetrievedCount(), metadata.getLlmCallCount(), metadata.getPipelineType());
+            log.info("[链路最终] 响应元数据组装FLOW|agent|node=action_compose|step=metadata|sessionId={}|retrievedCount={}|llmCallCount={}|pipelineType={}|qualityGate={}|qualityWarningCount={}|schemaVersion={}|next=最终响应",
+                    sessionId,
+                    metadata.getRetrievedCount(),
+                    metadata.getLlmCallCount(),
+                    metadata.getPipelineType(),
+                    metadata.getQualityGateTriggered(),
+                    metadata.getQualityWarningCount(),
+                    metadata.getExecutionSchemaVersion());
 
             // 3. 组装最终响应
 
@@ -175,5 +194,52 @@ public class ActionComposer {
             return text;
         }
         return text.substring(0, maxLength) + "...";
+    }
+
+    private String readString(Map<String, Object> data, String key, String defaultValue) {
+        if (data == null || key == null || !data.containsKey(key) || data.get(key) == null) {
+            return defaultValue;
+        }
+        return String.valueOf(data.get(key));
+    }
+
+    private Integer readInteger(Map<String, Object> data, String key, Integer defaultValue) {
+        if (data == null || key == null || !data.containsKey(key) || data.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = data.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignore) {
+            return defaultValue;
+        }
+    }
+
+    private Boolean readBoolean(Map<String, Object> data, String key, Boolean defaultValue) {
+        if (data == null || key == null || !data.containsKey(key) || data.get(key) == null) {
+            return defaultValue;
+        }
+        Object value = data.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private List<String> readStringList(Map<String, Object> data, String key) {
+        if (data == null || key == null || !data.containsKey(key) || data.get(key) == null) {
+            return List.of();
+        }
+        Object value = data.get(key);
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream()
+                .map(item -> item == null ? "" : String.valueOf(item))
+                .filter(item -> !item.isBlank())
+                .collect(Collectors.toList());
     }
 }

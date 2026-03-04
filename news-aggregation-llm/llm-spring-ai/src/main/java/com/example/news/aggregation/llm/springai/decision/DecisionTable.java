@@ -12,6 +12,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class DecisionTable {
 
+    private static final String RC_SCHEMA_UNSUPPORTED_COMPAT_RESTRICTED = "schema_version_unsupported_compat_restricted";
+    private static final String RC_OUTPUT_SCHEMA_VERSION_MISMATCH = "output_schema_version_mismatch";
+    private static final String RC_OUTPUT_MISSING_REQUIRED_FIELD_STABLE = "output_missing_required_field_stable";
+    private static final String RC_OUTPUT_TYPE_MISMATCH_STABLE = "output_type_mismatch_stable";
+    private static final String RC_OUTPUT_PARSE_ERROR = "output_parse_error";
+    private static final String RC_OUTPUT_MALFORMED_TEMPORARY = "output_malformed_temporary";
+    private static final String RC_DONE_CHECK_FAIL = "done_check_fail";
+
     /**
      * 决策入口。
      * 输入为 FailureContext，输出为唯一可执行动作(action)和下一状态(nextState)。
@@ -47,6 +55,35 @@ public class DecisionTable {
      * WAIT(外部信号/副作用未知) -> RETRY -> FALLBACK_TOOL -> REPLAN -> ABORT。
      */
     private DecisionResult retryableToolDecision(FailureContext context) {
+        String reason = context.getFailureReasonCode();
+
+        // 结构类稳定错误优先走 fallback/replan，避免无意义重试风暴。
+        if (RC_OUTPUT_SCHEMA_VERSION_MISMATCH.equals(reason)
+                || RC_OUTPUT_MISSING_REQUIRED_FIELD_STABLE.equals(reason)
+                || RC_OUTPUT_TYPE_MISMATCH_STABLE.equals(reason)) {
+            if (context.isHasFallbackTool()) {
+                return fallback(context, "fallback_tool_for_stable_output_schema_error");
+            }
+            if (context.isReplanAllowed()) {
+                return replan(context, "replan_for_stable_output_schema_error");
+            }
+            return fail("stable_output_schema_error_abort", context);
+        }
+
+        // 可恢复结构错误允许有限重试。
+        if (RC_OUTPUT_PARSE_ERROR.equals(reason) || RC_OUTPUT_MALFORMED_TEMPORARY.equals(reason)) {
+            if (canRetry(context)) {
+                return retry(context, reason);
+            }
+            if (context.isHasFallbackTool()) {
+                return fallback(context, "fallback_after_output_parse_retry_exhausted");
+            }
+            if (context.isReplanAllowed()) {
+                return replan(context, "replan_after_output_parse_retry_exhausted");
+            }
+            return fail("output_parse_retry_exhausted", context);
+        }
+
         if (shouldWaitForExternalSignal(context)) {
             return waitInput(context, "need_external_signal");
         }
@@ -54,42 +91,74 @@ public class DecisionTable {
             return waitInput(context, "write_effect_unknown_need_query");
         }
         if (canRetry(context)) {
-            return DecisionResult.builder()
-                    .action(ExecutionEnums.DecisionAction.RETRY)
-                    .nextState(ExecutionEnums.NextState.RUNNING)
-                    .reasonCode("retryable_tool_error")
-                    .resumeMode(resolveResumeMode(context))
-                    .build();
+            return retry(context, "retryable_tool_error");
         }
         if (context.isHasFallbackTool()) {
-            return DecisionResult.builder()
-                    .action(ExecutionEnums.DecisionAction.FALLBACK_TOOL)
-                    .nextState(ExecutionEnums.NextState.RUNNING)
-                    .reasonCode("fallback_tool")
-                    .resumeMode(resolveResumeMode(context))
-                    .build();
+            return fallback(context, "fallback_tool");
         }
         if (context.isReplanAllowed()) {
-            return DecisionResult.builder()
-                    .action(ExecutionEnums.DecisionAction.REPLAN)
-                    .nextState(ExecutionEnums.NextState.RUNNING)
-                    .reasonCode("replan_after_retry_exhausted")
-                    .resumeMode(resolveResumeMode(context))
-                    .build();
+            return replan(context, "replan_after_retry_exhausted");
         }
         return fail("retry_exhausted", context);
     }
 
     private DecisionResult qualityDecision(FailureContext context) {
+        String reason = context.getFailureReasonCode();
+
+        // schema 版本不支持（兼容模式）不允许继续正常路径，进入降级输出。
+        if (RC_SCHEMA_UNSUPPORTED_COMPAT_RESTRICTED.equals(reason)
+                || RC_OUTPUT_SCHEMA_VERSION_MISMATCH.equals(reason)) {
+            return degrade(context, "degrade_output_for_schema_incompatible");
+        }
+
+        // doneCheck 失败优先重规划；不可重规划时降级输出。
+        if (RC_DONE_CHECK_FAIL.equals(reason)) {
+            if (context.isReplanAllowed()) {
+                return replan(context, "quality_fail_replan");
+            }
+            return degrade(context, "degrade_output_for_done_check_fail");
+        }
+
         if (context.isReplanAllowed()) {
-            return DecisionResult.builder()
-                    .action(ExecutionEnums.DecisionAction.REPLAN)
-                    .nextState(ExecutionEnums.NextState.RUNNING)
-                    .reasonCode("quality_fail_replan")
-                    .resumeMode(resolveResumeMode(context))
-                    .build();
+            return replan(context, "quality_fail_replan");
         }
         return fail("quality_fail", context);
+    }
+
+    private DecisionResult retry(FailureContext context, String reason) {
+        return DecisionResult.builder()
+                .action(ExecutionEnums.DecisionAction.RETRY)
+                .nextState(ExecutionEnums.NextState.RUNNING)
+                .reasonCode(reason)
+                .resumeMode(resolveResumeMode(context))
+                .build();
+    }
+
+    private DecisionResult fallback(FailureContext context, String reason) {
+        return DecisionResult.builder()
+                .action(ExecutionEnums.DecisionAction.FALLBACK_TOOL)
+                .nextState(ExecutionEnums.NextState.RUNNING)
+                .reasonCode(reason)
+                .resumeMode(resolveResumeMode(context))
+                .build();
+    }
+
+    private DecisionResult replan(FailureContext context, String reason) {
+        return DecisionResult.builder()
+                .action(ExecutionEnums.DecisionAction.REPLAN)
+                .nextState(ExecutionEnums.NextState.RUNNING)
+                .reasonCode(reason)
+                .resumeMode(resolveResumeMode(context))
+                .build();
+    }
+
+    private DecisionResult degrade(FailureContext context, String reason) {
+        return DecisionResult.builder()
+                .action(ExecutionEnums.DecisionAction.DEGRADE_OUTPUT)
+                .nextState(ExecutionEnums.NextState.SUCCEEDED)
+                .reasonCode(reason)
+                .resumeMode(resolveResumeMode(context))
+                .build();
     }
 
     private DecisionResult waitInput(FailureContext context, String reason) {
