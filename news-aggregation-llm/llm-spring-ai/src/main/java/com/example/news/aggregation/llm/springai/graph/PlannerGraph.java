@@ -5,7 +5,7 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
 import com.example.news.aggregation.llm.springai.node.DependencyAnalysisNode;
-import com.example.news.aggregation.llm.springai.node.PlanBuildNode;
+import com.example.news.aggregation.llm.springai.node.ExecutionPlanBuilderNode;
 import com.example.news.aggregation.llm.springai.node.ResourceEstimationNode;
 import com.example.news.aggregation.llm.springai.node.TaskDecompositionNode;
 import com.example.news.aggregation.llm.springai.state.PlannerState;
@@ -31,7 +31,7 @@ public class PlannerGraph {
     private final TaskDecompositionNode taskDecompositionNode;
     private final DependencyAnalysisNode dependencyAnalysisNode;
     private final ResourceEstimationNode resourceEstimationNode;
-    private final PlanBuildNode planBuildNode;
+    private final ExecutionPlanBuilderNode executionPlanBuilderNode;
 
     private StateGraph graph;
     private CompiledGraph compiledGraph;
@@ -51,7 +51,7 @@ public class PlannerGraph {
                     updateState(state, resourceEstimationNode.execute(readState(state)))
             ));
             graph.addNode("plan_build", state -> CompletableFuture.completedFuture(
-                    updateState(state, planBuildNode.execute(readState(state)))
+                    updateState(state, executionPlanBuilderNode.execute(readState(state)))
             ));
 
             graph.addEdge(StateGraph.START, "task_decompose");

@@ -15,6 +15,9 @@ public enum ConversationState {
     /** 需要澄清 */
     NEED_CLARIFY,
 
+    /** 等待用户或外部信号恢复 */
+    WAITING,
+
     /** 任务规划 */
     PLAN,
 

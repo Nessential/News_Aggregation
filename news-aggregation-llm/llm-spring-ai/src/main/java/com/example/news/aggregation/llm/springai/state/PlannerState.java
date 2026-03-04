@@ -1,6 +1,6 @@
 package com.example.news.aggregation.llm.springai.state;
 
-import com.example.news.aggregation.llm.springai.contract.Plan;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,8 +35,11 @@ public class PlannerState {
     /** 依赖关系（taskId -> 依赖taskId列表） */
     private Map<String, List<String>> dependencies;
 
-    /** 生成的计划 */
-    private Plan plan;
+    /** 生成的执行计划 */
+    private ExecutionPlan executionPlan;
+
+    /** 语义版本 */
+    private String semanticVersion;
 
     /** 执行步数 */
     private int stepCount;

@@ -2,8 +2,8 @@ package com.example.news.aggregation.llm.springai.orchestrator;
 
 import com.example.news.aggregation.llm.springai.config.GraphProperties;
 import com.example.news.aggregation.llm.springai.contract.ChatResponse;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
-import com.example.news.aggregation.llm.springai.contract.Plan;
 import com.example.news.aggregation.llm.springai.contract.PlanRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
@@ -70,14 +70,14 @@ public class LLMOrchestrator {
             }
 
             // 3) Planner（可选）
-            Plan plan = null;
+            ExecutionPlan plan = null;
             if (graphProperties.isPlannerEnabled() && requiresPlanner(routerResult.getTaskFamily())) {
                 plan = plannerService.plan(PlanRequest.builder()
                         .query(userMessage)
                         .routerResult(routerResult)
                         .build());
                 log.info("[Orchestrator] Planner generated plan: tasks={}",
-                        plan.getTasks() != null ? plan.getTasks().size() : 0);
+                        plan.getSteps() != null ? plan.getSteps().size() : 0);
             }
 
             // 4) 检索与重排

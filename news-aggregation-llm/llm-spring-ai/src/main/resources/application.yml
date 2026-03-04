@@ -8,9 +8,9 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:your-api-key-here}
       chat:
-        model: qwen-plus
+        model: qwen3.5-flash
         temperature: 0.7
-        max-tokens: 4000
+        max-tokens: 10000
       embedding:
         model: text-embedding-v2
 
@@ -32,6 +32,10 @@ spring:
 # LLM应用配置
 app:
   llm:
+    planner:
+      schema-version: execution-plan/1.0
+      semantic-version: 1.0.0
+      decision-table-version: 1.0.0
     # Graph执行配置
     graph:
       router-enabled: true

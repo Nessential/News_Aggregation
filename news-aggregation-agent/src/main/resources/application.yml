@@ -30,7 +30,7 @@ spring:
       api-key: ${DASHSCOPE_API_KEY:mock-key}
       # chat模型配置  
       chat:
-        model: qwen-plus
+        model: qwen3.5-flash
         temperature: 0.7
 
 # 智谱 Embedding 配置 (使用 2048 维向量)
@@ -85,6 +85,9 @@ app:
     index-name: ${news.aggregation.elasticsearch.index-name}
   
   agent:
+    execution:
+      schema-version: execution-plan/1.0
+      semantic-version: 1.0.0
     # 会话管理
     session:
       # Session/Turn/幂等记录在 Redis 中的默认过期时间（分钟）

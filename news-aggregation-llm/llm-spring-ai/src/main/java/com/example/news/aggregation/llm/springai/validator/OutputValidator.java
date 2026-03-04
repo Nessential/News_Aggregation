@@ -1,7 +1,8 @@
 package com.example.news.aggregation.llm.springai.validator;
 
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
-import com.example.news.aggregation.llm.springai.contract.Plan;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
+import com.example.news.aggregation.llm.springai.contract.ExecutionStep;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -103,14 +104,24 @@ public class OutputValidator {
      * @param plan 计划
      * @return 是否通过
      */
-    public boolean validatePlan(Plan plan) {
+    public boolean validateExecutionPlan(ExecutionPlan plan) {
         if (plan == null) {
-            log.warn("Plan is null");
+            log.warn("ExecutionPlan is null");
             return false;
         }
-        if (plan.getTasks() == null || plan.getTasks().isEmpty()) {
-            log.warn("Plan tasks is empty");
+        if (plan.getSteps() == null || plan.getSteps().isEmpty()) {
+            log.warn("ExecutionPlan steps is empty");
             return false;
+        }
+        for (ExecutionStep step : plan.getSteps()) {
+            if (step == null || step.getStepId() == null || step.getStepId().isBlank()) {
+                log.warn("ExecutionPlan stepId is empty");
+                return false;
+            }
+            if (step.getTool() == null || step.getTool().isBlank()) {
+                log.warn("ExecutionPlan tool is empty, stepId={}", step.getStepId());
+                return false;
+            }
         }
         return true;
     }

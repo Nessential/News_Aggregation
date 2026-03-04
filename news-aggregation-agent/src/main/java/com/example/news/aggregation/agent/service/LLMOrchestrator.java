@@ -20,14 +20,13 @@ import com.example.news.aggregation.agent.workflow.WorkflowContext;
 import com.example.news.aggregation.agent.workflow.WorkflowDefinition;
 import com.example.news.aggregation.agent.workflow.WorkflowOrchestrator;
 import com.example.news.aggregation.agent.workflow.WorkflowStep;
-import com.example.news.aggregation.llm.springai.contract.Plan;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +54,10 @@ public class LLMOrchestrator {
     private final ActionComposer actionComposer;
     private final ConversationFSM conversationFSM;
 
+    /**
+     * 对话处理入口。
+     * 覆盖会话串行、幂等回放、单轮执行、结果落库与异常收敛。
+     */
     public AgentResponse handleChat(ChatRequest request) {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
         SessionState sessionState = getOrCreateSession(request, userId);
@@ -118,9 +121,25 @@ public class LLMOrchestrator {
             AgentResponse response = executeSingleTurn(request, sessionState, turnId);
             response.setSessionId(sessionId);
             response.setTurnId(turnId);
-            response.setTurnStatus(TurnStatus.DONE.name());
-            response.setErrorCode(null);
-            response.setRunningTurnId(null);
+
+            if (response.getTurnStatus() == null || response.getTurnStatus().isBlank()) {
+                response.setTurnStatus(TurnStatus.DONE.name());
+            }
+
+            if (TurnStatus.FAILED.name().equalsIgnoreCase(response.getTurnStatus())) {
+                String errorCode = response.getErrorCode() != null ? response.getErrorCode() : "TURN_EXECUTION_FAILED";
+                String errorMessage = response.getAnswer() != null ? response.getAnswer() : "turn failed";
+                turnManager.markTurnFailed(sessionId, turnId, errorCode, errorMessage);
+                turnManager.markIdempotencyFailed(
+                        sessionId,
+                        idempotencyKey,
+                        turnId,
+                        errorCode,
+                        errorMessage,
+                        response
+                );
+                return response;
+            }
 
             turnManager.markTurnDone(sessionId, turnId, response);
             turnManager.markIdempotencyDone(sessionId, idempotencyKey, turnId, response);
@@ -151,6 +170,10 @@ public class LLMOrchestrator {
         }
     }
 
+    /**
+     * 执行单轮对话主流程。
+     * 路由后按任务复杂度选择“直接工作流”或“Planner + ExecutionPlan”执行。
+     */
     private AgentResponse executeSingleTurn(ChatRequest request, SessionState sessionState, String turnId) {
         String sessionId = sessionState.getSessionId();
         ConversationState currentFsmState = getCurrentTurnFsmState(sessionId, turnId);
@@ -190,6 +213,7 @@ public class LLMOrchestrator {
         currentFsmState = transitionState(sessionId, turnId, currentFsmState, nextAfterRoute);
 
         if (nextAfterRoute == ConversationState.NEED_CLARIFY) {
+            currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.WAITING);
             return buildClarificationResponse(sessionState, routerResult, turnId);
         }
 
@@ -206,6 +230,8 @@ public class LLMOrchestrator {
         }
 
         if (nextAfterRoute == ConversationState.BUILD_EVIDENCE && directAnswer) {
+            log.info("[orchestrator] 进入直答分支：sessionId={}, turnId={}, taskFamily={}, retrievalMode={}",
+                    sessionId, turnId, routerResult.getTaskFamily(), routerResult.getRetrievalMode());
             if (currentFsmState != ConversationState.BUILD_EVIDENCE) {
                 currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.BUILD_EVIDENCE);
             }
@@ -217,29 +243,43 @@ public class LLMOrchestrator {
         } else {
             boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
             if (usePlanner) {
+                log.info("[orchestrator] 进入规划分支：sessionId={}, turnId={}, taskFamily={}",
+                        sessionId, turnId, taskFamily);
                 if (currentFsmState != ConversationState.PLAN) {
                     currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.PLAN);
                 }
-                Plan plan = plannerClient.plan(request.getQuery(), routerResult);
-                if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
-                    plan = buildDefaultPlan(taskFamily, request.getQuery());
-                }
-                fsmContext.setPlan(plan);
+                ExecutionPlan plan = plannerClient.plan(request.getQuery(), routerResult);
+                requireValidPlan(plan, taskFamily, request.getQuery());
+                log.info("[orchestrator] 规划完成：sessionId={}, turnId={}, planId={}, stepCount={}",
+                        sessionId, turnId, plan.getPlanId(), plan.getSteps() == null ? 0 : plan.getSteps().size());
+                fsmContext.setExecutionPlan(plan);
                 ConversationState nextAfterPlan = conversationFSM.nextState(ConversationState.PLAN, fsmContext);
                 currentFsmState = transitionState(sessionId, turnId, currentFsmState, nextAfterPlan);
                 workflowOrchestrator.executePlan(plan, workflowContext);
             } else {
+                log.info("[orchestrator] 进入固定工作流分支：sessionId={}, turnId={}, taskFamily={}",
+                        sessionId, turnId, taskFamily);
                 if (currentFsmState != ConversationState.RETRIEVE) {
                     currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.RETRIEVE);
                 }
                 String workflowId = resolveWorkflowId(taskFamily);
                 if (workflowOrchestrator.hasWorkflow(workflowId)) {
+                    log.info("[orchestrator] 开始执行固定工作流：sessionId={}, turnId={}, workflowId={}",
+                            sessionId, turnId, workflowId);
                     workflowOrchestrator.executeWorkflow(workflowId, workflowContext);
                 } else {
-                    Plan fallbackPlan = buildDefaultPlan(taskFamily, request.getQuery());
-                    workflowOrchestrator.executePlan(fallbackPlan, workflowContext);
+                    throw new IllegalStateException("WORKFLOW_NOT_FOUND:" + workflowId + ", taskFamily=" + taskFamily);
                 }
             }
+        }
+
+        if (Boolean.TRUE.equals(workflowContext.getAttributes().get("workflow.waiting"))) {
+            String waitingReason = String.valueOf(workflowContext.getAttributes()
+                    .getOrDefault("workflow.waiting.reason", "需要更多输入信息"));
+            log.info("[orchestrator] 工作流进入等待：sessionId={}, turnId={}, reason={}",
+                    sessionId, turnId, waitingReason);
+            currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.WAITING);
+            return buildWaitingResponse(sessionState, turnId, waitingReason);
         }
 
         fsmContext.setEvidenceCount(workflowContext.getEvidence().size());
@@ -264,6 +304,12 @@ public class LLMOrchestrator {
                 .query(request.getQuery())
                 .build();
         AgentResponse response = actionComposer.buildResponse(pipelineResult, context, taskFamily);
+        log.info("[orchestrator] 响应组装完成：sessionId={}, turnId={}, answerLength={}, citationCount={}, candidateCount={}",
+                sessionId,
+                turnId,
+                response.getAnswer() == null ? 0 : response.getAnswer().length(),
+                response.getCitations() == null ? 0 : response.getCitations().size(),
+                response.getCandidates() == null ? 0 : response.getCandidates().size());
 
         if (pipelineResult.getCandidateIds() != null) {
             sessionManager.updateCandidates(sessionId, pipelineResult.getCandidateIds());
@@ -272,6 +318,13 @@ public class LLMOrchestrator {
 
         transitionState(sessionId, turnId, currentFsmState, ConversationState.DONE);
         return response;
+    }
+
+    private void requireValidPlan(ExecutionPlan plan, TaskFamily taskFamily, String query) {
+        if (plan != null && plan.getSteps() != null && !plan.getSteps().isEmpty()) {
+            return;
+        }
+        throw new IllegalStateException("PLANNER_EMPTY_PLAN: taskFamily=" + taskFamily + ", query=" + truncate(query, 120));
     }
 
     private SessionState getOrCreateSession(ChatRequest request, String userId) {
@@ -319,35 +372,6 @@ public class LLMOrchestrator {
             case TIMELINE -> "TIMELINE_WORKFLOW";
             default -> null;
         };
-    }
-
-    private Plan buildDefaultPlan(TaskFamily taskFamily, String query) {
-        List<Plan.Task> tasks = new ArrayList<>();
-        tasks.add(Plan.Task.builder()
-                .id("task-1")
-                .type("SEARCH")
-                .description("关键词检索")
-                .parameters(Map.of("query", query))
-                .build());
-        tasks.add(Plan.Task.builder()
-                .id("task-2")
-                .type("RETRIEVE")
-                .description("向量检索")
-                .parameters(Map.of("query", query, "mode", "HYBRID"))
-                .build());
-        tasks.add(Plan.Task.builder()
-                .id("task-3")
-                .type(taskFamily == TaskFamily.QA ? "QA" : taskFamily.name())
-                .description("生成答案")
-                .parameters(Map.of("query", query, "taskFamily", taskFamily.name()))
-                .build());
-
-        return Plan.builder()
-                .tasks(tasks)
-                .executionOrder(List.of("task-1", "task-2", "task-3"))
-                .totalEstimatedTime(10)
-                .parallelizable(false)
-                .build();
     }
 
     private WorkflowDefinition buildDirectWorkflow(String taskFamily, String retrievalMode) {
@@ -433,6 +457,19 @@ public class LLMOrchestrator {
                 .answer("我需要更多信息才能继续回答。")
                 .needsClarification(true)
                 .clarificationPrompt(routerResult.getClarificationQuestion())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    private AgentResponse buildWaitingResponse(SessionState sessionState, String turnId, String reason) {
+        return AgentResponse.builder()
+                .sessionId(sessionState.getSessionId())
+                .turnId(turnId)
+                .turnStatus(TurnStatus.DONE.name())
+                .errorCode("NEED_USER_INPUT")
+                .answer("需要补充信息后才能继续处理。")
+                .needsClarification(true)
+                .clarificationPrompt(reason)
                 .timestamp(LocalDateTime.now())
                 .build();
     }
