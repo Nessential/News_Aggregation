@@ -119,6 +119,44 @@ public class ExecutionStepRunRepository {
         return stepRunMapper.updateOutputWithCas(runId, stepId, expectedLockVersion, outputJson);
     }
 
+    public int updateSelectionSnapshotWithCas(String runId,
+                                              String stepId,
+                                              Integer expectedLockVersion,
+                                              String selectedTool,
+                                              String selectionReasonCode,
+                                              String circuitStateSnapshot,
+                                              String fallbackCandidatesJson) {
+        return stepRunMapper.updateSelectionSnapshotWithCas(
+                runId,
+                stepId,
+                expectedLockVersion,
+                selectedTool,
+                selectionReasonCode,
+                circuitStateSnapshot,
+                fallbackCandidatesJson
+        );
+    }
+
+    public int updateActiveSelectionSnapshotWithCas(String runId,
+                                                    String stepId,
+                                                    Integer expectedLockVersion,
+                                                    String activeCapabilityName,
+                                                    String selectedTool,
+                                                    String selectionReasonCode,
+                                                    String circuitStateSnapshot,
+                                                    String fallbackCandidatesJson) {
+        return stepRunMapper.updateActiveSelectionSnapshotWithCas(
+                runId,
+                stepId,
+                expectedLockVersion,
+                activeCapabilityName,
+                selectedTool,
+                selectionReasonCode,
+                circuitStateSnapshot,
+                fallbackCandidatesJson
+        );
+    }
+
     public List<ExecutionStepRunEntity> listExpiredRunning(Integer limit) {
         return stepRunMapper.listExpiredRunning(limit);
     }

@@ -5,8 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 失败决策表。
- * 先按错误类别分组，再在组内返回唯一动作。
+ * Failure decision table with deterministic action mapping.
  */
 @Slf4j
 @Component
@@ -19,17 +18,25 @@ public class DecisionTable {
     private static final String RC_OUTPUT_PARSE_ERROR = "output_parse_error";
     private static final String RC_OUTPUT_MALFORMED_TEMPORARY = "output_malformed_temporary";
     private static final String RC_DONE_CHECK_FAIL = "done_check_fail";
+    private static final String RC_FALLBACK_UNAVAILABLE = "fallback_unavailable";
 
-    /**
-     * 决策入口。
-     * 输入为 FailureContext，输出为唯一可执行动作(action)和下一状态(nextState)。
-     */
     public DecisionResult resolve(FailureContext context) {
         if (context == null || context.getErrorCategory() == null) {
             DecisionResult invalid = fail("invalid_context", context);
-            log.warn("[decision] 决策输入无效：context={}, action={}, nextState={}",
+            log.warn("[decision] invalid context|context={} |action={} |nextState={}",
                     context, invalid.getAction(), invalid.getNextState());
             return invalid;
+        }
+
+        if (RC_FALLBACK_UNAVAILABLE.equals(context.getFailureReasonCode())) {
+            DecisionResult mapped = fallbackUnavailableDecision(context);
+            log.info("[decision] fallback_unavailable mapped|needsExternalSignal={} |replanAllowed={} |action={} |nextState={} |reason={}",
+                    context.isNeedsExternalSignal(),
+                    context.isReplanAllowed(),
+                    mapped.getAction(),
+                    mapped.getNextState(),
+                    mapped.getReasonCode());
+            return mapped;
         }
 
         DecisionResult result = switch (context.getErrorCategory()) {
@@ -38,7 +45,7 @@ public class DecisionTable {
             case QUALITY_FAIL -> qualityDecision(context);
             case RETRYABLE_TOOL_ERROR -> retryableToolDecision(context);
         };
-        log.info("[decision] 决策完成：category={}, retry={}/{}, sideEffect={}, effectState={}, action={}, nextState={}, reason={}",
+        log.info("[decision] resolved|category={} |retry={}/{} |sideEffect={} |effectState={} |action={} |nextState={} |reason={}",
                 context.getErrorCategory(),
                 context.getRetryCount(),
                 context.getMaxRetries(),
@@ -50,14 +57,19 @@ public class DecisionTable {
         return result;
     }
 
-    /**
-     * 可重试工具错误的决策分流：
-     * WAIT(外部信号/副作用未知) -> RETRY -> FALLBACK_TOOL -> REPLAN -> ABORT。
-     */
+    private DecisionResult fallbackUnavailableDecision(FailureContext context) {
+        if (context != null && context.isNeedsExternalSignal()) {
+            return waitInput(context, RC_FALLBACK_UNAVAILABLE);
+        }
+        if (context != null && context.isReplanAllowed()) {
+            return replan(context, RC_FALLBACK_UNAVAILABLE);
+        }
+        return abort(context, RC_FALLBACK_UNAVAILABLE);
+    }
+
     private DecisionResult retryableToolDecision(FailureContext context) {
         String reason = context.getFailureReasonCode();
 
-        // 结构类稳定错误优先走 fallback/replan，避免无意义重试风暴。
         if (RC_OUTPUT_SCHEMA_VERSION_MISMATCH.equals(reason)
                 || RC_OUTPUT_MISSING_REQUIRED_FIELD_STABLE.equals(reason)
                 || RC_OUTPUT_TYPE_MISMATCH_STABLE.equals(reason)) {
@@ -70,7 +82,6 @@ public class DecisionTable {
             return fail("stable_output_schema_error_abort", context);
         }
 
-        // 可恢复结构错误允许有限重试。
         if (RC_OUTPUT_PARSE_ERROR.equals(reason) || RC_OUTPUT_MALFORMED_TEMPORARY.equals(reason)) {
             if (canRetry(context)) {
                 return retry(context, reason);
@@ -105,13 +116,11 @@ public class DecisionTable {
     private DecisionResult qualityDecision(FailureContext context) {
         String reason = context.getFailureReasonCode();
 
-        // schema 版本不支持（兼容模式）不允许继续正常路径，进入降级输出。
         if (RC_SCHEMA_UNSUPPORTED_COMPAT_RESTRICTED.equals(reason)
                 || RC_OUTPUT_SCHEMA_VERSION_MISMATCH.equals(reason)) {
             return degrade(context, "degrade_output_for_schema_incompatible");
         }
 
-        // doneCheck 失败优先重规划；不可重规划时降级输出。
         if (RC_DONE_CHECK_FAIL.equals(reason)) {
             if (context.isReplanAllowed()) {
                 return replan(context, "quality_fail_replan");
