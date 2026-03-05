@@ -2,6 +2,7 @@ package com.example.news.aggregation.agent.execution.service;
 
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
+import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
 import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
@@ -71,10 +72,11 @@ public class ExecutionRecoveryService {
             }
 
             if (action == RecoveryAction.REPLAN) {
+                String finalReason = persistReplanAttempt(step, "replan_required");
                 stepClaimService.markFailed(
                         step.getRunId(),
                         step.getStepId(),
-                        "replan_required",
+                        finalReason,
                         "REPLAN_REQUIRED",
                         "quality failure requires replan"
                 );
@@ -254,10 +256,11 @@ public class ExecutionRecoveryService {
             return;
         }
         if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.REPLAN) {
+            String finalReason = persistReplanAttempt(step, fallbackReasonCode);
             stepClaimService.markFailed(
                     step.getRunId(),
                     step.getStepId(),
-                    fallbackReasonCode,
+                    finalReason,
                     "REPLAN_REQUIRED",
                     "fallback cannot be scheduled, replan required"
             );
@@ -267,7 +270,7 @@ public class ExecutionRecoveryService {
                     "fallback cannot be scheduled"
             );
             log.info("[execution-recovery] fallback 不可用后转 REPLAN|runId={} |stepId={} |reasonCode={}",
-                    step.getRunId(), step.getStepId(), fallbackReasonCode);
+                    step.getRunId(), step.getStepId(), finalReason);
             return;
         }
         stepClaimService.markFailed(
@@ -471,6 +474,45 @@ public class ExecutionRecoveryService {
                 return false;
             }
         }
+    }
+
+    /**
+     * 恢复线程中的 Replan 审计回填：
+     * 1. 扣减 run 级预算（复用 active_plan_version，保证统计一致）；
+     * 2. 回填 step 级 replan 计数与原因码。
+     */
+    private String persistReplanAttempt(ExecutionStepRunEntity step, String reasonCode) {
+        if (step == null) {
+            return "replan_cas_exhausted";
+        }
+        String normalizedReason = reasonCode == null || reasonCode.isBlank() ? "replan_required" : reasonCode;
+        ExecutionRunEntity runEntity = executionRunService.findByRunId(step.getRunId());
+        int activePlanVersion = runEntity == null || runEntity.getActivePlanVersion() == null
+                ? 1
+                : Math.max(1, runEntity.getActivePlanVersion());
+        boolean runBudgetUpdated = executionRunService.switchActivePlanVersionAndIncreaseReplanCount(
+                step.getRunId(),
+                activePlanVersion
+        );
+        if (!runBudgetUpdated) {
+            log.warn("[execution-recovery] Replan 回填失败：run 预算 CAS 更新失败|runId={} |stepId={} |activePlanVersion={}",
+                    step.getRunId(), step.getStepId(), activePlanVersion);
+            return "replan_cas_exhausted";
+        }
+        boolean stepRecorded = stepClaimService.recordReplanAttempt(
+                step.getRunId(),
+                step.getStepId(),
+                normalizedReason,
+                null,
+                null,
+                "REPLAN"
+        );
+        if (!stepRecorded) {
+            log.warn("[execution-recovery] Replan 回填失败：step 快照 CAS 更新失败|runId={} |stepId={} |reasonCode={}",
+                    step.getRunId(), step.getStepId(), normalizedReason);
+            return "replan_cas_exhausted";
+        }
+        return normalizedReason;
     }
 
     private enum RecoveryAction {

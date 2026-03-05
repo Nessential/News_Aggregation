@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Failure decision table with deterministic action mapping.
+ * 失败决策表：保证同一输入得到稳定、可解释的动作输出。
  */
 @Slf4j
 @Component
@@ -23,14 +23,14 @@ public class DecisionTable {
     public DecisionResult resolve(FailureContext context) {
         if (context == null || context.getErrorCategory() == null) {
             DecisionResult invalid = fail("invalid_context", context);
-            log.warn("[decision] invalid context|context={} |action={} |nextState={}",
+            log.warn("[decision] 决策上下文无效|context={} |action={} |nextState={}",
                     context, invalid.getAction(), invalid.getNextState());
             return invalid;
         }
 
         if (RC_FALLBACK_UNAVAILABLE.equals(context.getFailureReasonCode())) {
             DecisionResult mapped = fallbackUnavailableDecision(context);
-            log.info("[decision] fallback_unavailable mapped|needsExternalSignal={} |replanAllowed={} |action={} |nextState={} |reason={}",
+            log.info("[decision] fallback_unavailable 映射完成|needsExternalSignal={} |replanAllowed={} |action={} |nextState={} |reason={}",
                     context.isNeedsExternalSignal(),
                     context.isReplanAllowed(),
                     mapped.getAction(),
@@ -45,7 +45,7 @@ public class DecisionTable {
             case QUALITY_FAIL -> qualityDecision(context);
             case RETRYABLE_TOOL_ERROR -> retryableToolDecision(context);
         };
-        log.info("[decision] resolved|category={} |retry={}/{} |sideEffect={} |effectState={} |action={} |nextState={} |reason={}",
+        log.info("[decision] 决策完成|category={} |retry={}/{} |sideEffect={} |effectState={} |action={} |nextState={} |reason={}",
                 context.getErrorCategory(),
                 context.getRetryCount(),
                 context.getMaxRetries(),
@@ -62,7 +62,7 @@ public class DecisionTable {
             return waitInput(context, RC_FALLBACK_UNAVAILABLE);
         }
         if (context != null && context.isReplanAllowed()) {
-            return replan(context, RC_FALLBACK_UNAVAILABLE);
+            return replanWithGuards(context, RC_FALLBACK_UNAVAILABLE);
         }
         return abort(context, RC_FALLBACK_UNAVAILABLE);
     }
@@ -77,7 +77,7 @@ public class DecisionTable {
                 return fallback(context, "fallback_tool_for_stable_output_schema_error");
             }
             if (context.isReplanAllowed()) {
-                return replan(context, "replan_for_stable_output_schema_error");
+                return replanWithGuards(context, "replan_for_stable_output_schema_error");
             }
             return fail("stable_output_schema_error_abort", context);
         }
@@ -90,7 +90,7 @@ public class DecisionTable {
                 return fallback(context, "fallback_after_output_parse_retry_exhausted");
             }
             if (context.isReplanAllowed()) {
-                return replan(context, "replan_after_output_parse_retry_exhausted");
+                return replanWithGuards(context, "replan_after_output_parse_retry_exhausted");
             }
             return fail("output_parse_retry_exhausted", context);
         }
@@ -108,7 +108,7 @@ public class DecisionTable {
             return fallback(context, "fallback_tool");
         }
         if (context.isReplanAllowed()) {
-            return replan(context, "replan_after_retry_exhausted");
+            return replanWithGuards(context, "replan_after_retry_exhausted");
         }
         return fail("retry_exhausted", context);
     }
@@ -123,15 +123,84 @@ public class DecisionTable {
 
         if (RC_DONE_CHECK_FAIL.equals(reason)) {
             if (context.isReplanAllowed()) {
-                return replan(context, "quality_fail_replan");
+                return replanWithGuards(context, "quality_fail_replan");
             }
             return degrade(context, "degrade_output_for_done_check_fail");
         }
 
         if (context.isReplanAllowed()) {
-            return replan(context, "quality_fail_replan");
+            return replanWithGuards(context, "quality_fail_replan");
         }
         return fail("quality_fail", context);
+    }
+
+    private DecisionResult replanWithGuards(FailureContext context, String reason) {
+        DecisionResult blocked = guardReplan(context);
+        if (blocked != null) {
+            return blocked;
+        }
+        return replan(context, reason);
+    }
+
+    private DecisionResult guardReplan(FailureContext context) {
+        if (context == null) {
+            return abort(null, "replan_invalid_context");
+        }
+        if (Boolean.TRUE.equals(context.getReplanNonRetryableReason())) {
+            return abort(context, "replan_non_retryable_reason");
+        }
+        if (Boolean.TRUE.equals(context.getReplanNoEffectiveChange())) {
+            return abort(context, "replan_no_effective_change");
+        }
+        if (isReplanHardLimitReached(context)) {
+            return abort(context, "replan_hard_limit_reached");
+        }
+        if (isReplanBudgetExhaustedRun(context)) {
+            return abort(context, "replan_budget_exhausted_run");
+        }
+        if (isReplanBudgetExhaustedStep(context)) {
+            return abort(context, "replan_budget_exhausted_step");
+        }
+        if (Boolean.FALSE.equals(context.getEvidenceSufficient())) {
+            if (context.isNeedsExternalSignal()) {
+                return waitInput(context, "evidence_insufficient_wait");
+            }
+            return abort(context, "evidence_insufficient_abort");
+        }
+        return null;
+    }
+
+    private boolean isReplanBudgetExhaustedRun(FailureContext context) {
+        if (context.getMaxReplansPerRun() == null || context.getMaxReplansPerRun() < 0) {
+            return false;
+        }
+        int current = context.getReplanCountRun() == null ? 0 : Math.max(0, context.getReplanCountRun());
+        return current >= context.getMaxReplansPerRun();
+    }
+
+    private boolean isReplanBudgetExhaustedStep(FailureContext context) {
+        if (context.getMaxReplansPerStep() == null || context.getMaxReplansPerStep() < 0) {
+            return false;
+        }
+        int current = context.getReplanCountStep() == null ? 0 : Math.max(0, context.getReplanCountStep());
+        return current >= context.getMaxReplansPerStep();
+    }
+
+    private boolean isReplanHardLimitReached(FailureContext context) {
+        if (context == null) {
+            return false;
+        }
+        if (context.getMaxSteps() != null && context.getMaxSteps() >= 0) {
+            int currentSteps = context.getStepCount() == null ? 0 : Math.max(0, context.getStepCount());
+            if (currentSteps >= context.getMaxSteps()) {
+                return true;
+            }
+        }
+        if (context.getTimeoutMs() != null && context.getTimeoutMs() >= 0) {
+            long elapsed = context.getElapsedMs() == null ? 0L : Math.max(0L, context.getElapsedMs());
+            return elapsed >= context.getTimeoutMs();
+        }
+        return false;
     }
 
     private DecisionResult retry(FailureContext context, String reason) {

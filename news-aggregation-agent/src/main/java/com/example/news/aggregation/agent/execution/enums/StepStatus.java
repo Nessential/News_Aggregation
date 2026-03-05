@@ -1,7 +1,7 @@
 package com.example.news.aggregation.agent.execution.enums;
 
 /**
- * 步骤状态。
+ * step 执行状态枚举。
  */
 public enum StepStatus {
     PENDING,
@@ -9,5 +9,6 @@ public enum StepStatus {
     WAITING,
     SUCCEEDED,
     FAILED,
-    SKIPPED
+    SKIPPED,
+    SUPERSEDED
 }

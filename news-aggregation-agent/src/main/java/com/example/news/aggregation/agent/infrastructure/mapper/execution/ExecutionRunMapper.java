@@ -49,4 +49,17 @@ public interface ExecutionRunMapper extends BaseMapper<ExecutionRunEntity> {
                             @Param("errorCode") String errorCode,
                             @Param("errorMessage") String errorMessage,
                             @Param("finishedAt") Date finishedAt);
+
+    @Update("""
+            UPDATE agent_execution_run
+            SET active_plan_version = #{activePlanVersion},
+                replan_count_run = replan_count_run + 1,
+                lock_version = lock_version + 1
+            WHERE run_id = #{runId}
+              AND deleted = 0
+              AND lock_version = #{expectedLockVersion}
+            """)
+    int switchActivePlanVersionAndIncreaseReplanCountWithCas(@Param("runId") String runId,
+                                                              @Param("expectedLockVersion") Integer expectedLockVersion,
+                                                              @Param("activePlanVersion") Integer activePlanVersion);
 }

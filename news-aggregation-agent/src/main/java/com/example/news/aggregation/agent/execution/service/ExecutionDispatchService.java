@@ -16,12 +16,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Rebuilds workflow context from persisted run/step state and dispatches execution.
+ * 从持久化 run/step 状态重建工作流，并继续调度执行。
  */
 @Slf4j
 @Service
@@ -47,16 +49,29 @@ public class ExecutionDispatchService {
         if (stepRuns == null || stepRuns.isEmpty()) {
             return false;
         }
+        Integer activePlanVersion = run.getActivePlanVersion();
+        if (activePlanVersion != null && activePlanVersion > 0) {
+            stepRuns = stepRuns.stream()
+                    .filter(step -> step != null
+                            && step.getPlanVersion() != null
+                            && step.getPlanVersion().equals(activePlanVersion))
+                    .toList();
+            if (stepRuns.isEmpty()) {
+                log.warn("[execution-dispatch] 当前激活计划版本无可调度步骤|runId={} |activePlanVersion={}",
+                        runId, activePlanVersion);
+                return false;
+            }
+        }
 
         WorkflowDefinition workflow = rebuildWorkflow(run, stepRuns, triggerStepId, resumeInput);
         WorkflowContext context = buildContext(run, stepRuns);
-        log.info("[execution-dispatch] rebuild run and continue execution|runId={} |stepCount={} |triggerStepId={}",
+        log.info("[execution-dispatch] 已重建运行并继续执行|runId={} |stepCount={} |triggerStepId={}",
                 runId, stepRuns.size(), triggerStepId);
         try {
             workflowOrchestrator.executeWorkflow(workflow, context);
             return true;
         } catch (Exception e) {
-            log.error("[execution-dispatch] dispatch failed|runId={} |triggerStepId={}", runId, triggerStepId, e);
+            log.error("[execution-dispatch] 续跑派发失败|runId={} |triggerStepId={}", runId, triggerStepId, e);
             return false;
         }
     }
@@ -65,6 +80,13 @@ public class ExecutionDispatchService {
                                                List<ExecutionStepRunEntity> stepRuns,
                                                String triggerStepId,
                                                Map<String, Object> resumeInput) {
+        Set<String> activeStepIds = new HashSet<>();
+        for (ExecutionStepRunEntity stepRun : stepRuns) {
+            if (stepRun != null && stepRun.getStepId() != null && !stepRun.getStepId().isBlank()) {
+                activeStepIds.add(stepRun.getStepId());
+            }
+        }
+
         List<WorkflowStep> steps = new ArrayList<>();
         for (ExecutionStepRunEntity stepRun : stepRuns) {
             Map<String, Object> parameters = readMap(stepRun.getInputJson());
@@ -77,7 +99,7 @@ public class ExecutionDispatchService {
             steps.add(WorkflowStep.builder()
                     .stepId(stepRun.getStepId())
                     .capabilityName(resolveCapability(stepRun))
-                    .dependsOn(readStringList(stepRun.getDependsOnJson()))
+                    .dependsOn(filterActiveDependencies(stepRun, activeStepIds))
                     .parameters(parameters)
                     .sideEffect(stepRun.getSideEffect())
                     .failurePolicy(buildFailurePolicy(stepRun))
@@ -89,9 +111,28 @@ public class ExecutionDispatchService {
                 .steps(steps)
                 .metadata(Map.of(
                         "source", "execution_step_run",
-                        "recoveryMode", true
+                        "recoveryMode", true,
+                        "planVersion", run.getActivePlanVersion() == null ? 1 : run.getActivePlanVersion()
                 ))
                 .build();
+    }
+
+    /**
+     * 仅保留 active plan 内部依赖，阻断旧计划输出对新计划下游的影响。
+     */
+    private List<String> filterActiveDependencies(ExecutionStepRunEntity stepRun, Set<String> activeStepIds) {
+        List<String> original = readStringList(stepRun.getDependsOnJson());
+        if (original.isEmpty() || activeStepIds == null || activeStepIds.isEmpty()) {
+            return original;
+        }
+        List<String> filtered = original.stream()
+                .filter(activeStepIds::contains)
+                .toList();
+        if (filtered.size() != original.size()) {
+            log.info("[execution-dispatch] 已过滤跨版本依赖|runId={} |stepId={} |originDepends={} |filteredDepends={}",
+                    stepRun.getRunId(), stepRun.getStepId(), original, filtered);
+        }
+        return filtered;
     }
 
     private WorkflowContext buildContext(ExecutionRunEntity run, List<ExecutionStepRunEntity> stepRuns) {

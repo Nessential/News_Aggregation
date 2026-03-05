@@ -1,12 +1,17 @@
 package com.example.news.aggregation.agent.workflow;
 
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
+import com.example.news.aggregation.agent.execution.config.ReplanControlProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
+import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
 import com.example.news.aggregation.agent.execution.enums.StepStatus;
+import com.example.news.aggregation.agent.execution.model.ReplanChangeProof;
+import com.example.news.aggregation.agent.execution.model.ReplanEvidenceSnapshot;
 import com.example.news.aggregation.agent.execution.service.EffectLatchService;
 import com.example.news.aggregation.agent.execution.service.ExecutionRunService;
+import com.example.news.aggregation.agent.execution.service.ReplanGuardService;
 import com.example.news.aggregation.agent.execution.service.StepClaimService;
 import com.example.news.aggregation.agent.workflow.validation.SchemaValidationProperties;
 import com.example.news.aggregation.agent.workflow.validation.ToolInputValidator;
@@ -29,6 +34,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -62,6 +68,8 @@ public class WorkflowOrchestrator {
     private final ToolOutputValidator toolOutputValidator;
     private final SchemaValidationProperties schemaValidationProperties;
     private final ExecutionPersistenceProperties executionPersistenceProperties;
+    private final ReplanControlProperties replanControlProperties;
+    private final ReplanGuardService replanGuardService;
 
     private final ExecutionRunService executionRunService;
     private final StepClaimService stepClaimService;
@@ -106,7 +114,8 @@ public class WorkflowOrchestrator {
                 runId,
                 normalizedSteps,
                 resolveGlobalDefaultMaxRetries(),
-                executionPersistenceProperties.getRecovery().getMaxRecoveryAttempts()
+                executionPersistenceProperties.getRecovery().getMaxRecoveryAttempts(),
+                resolvePlanVersion(workflow, context)
         );
 
         boolean hasDependencies = normalizedSteps.stream().anyMatch(step -> step.getDependsOn() != null && !step.getDependsOn().isEmpty());
@@ -477,7 +486,8 @@ public class WorkflowOrchestrator {
             }
             case REPLAN -> {
                 context.putAttribute("workflow.replan.required", true);
-                stepClaimService.markFailed(runId, stepId, reasonCode, "REPLAN_REQUIRED", truncateError(e.getMessage()));
+                String finalReasonCode = persistReplanAttempt(runId, stepId, reasonCode, context);
+                stepClaimService.markFailed(runId, stepId, finalReasonCode, "REPLAN_REQUIRED", truncateError(e.getMessage()));
             }
             case FALLBACK_TOOL -> {
                 handleFallbackUnavailable(step, context, e, failed, null);
@@ -555,12 +565,13 @@ public class WorkflowOrchestrator {
         }
         if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.REPLAN) {
             context.putAttribute("workflow.replan.required", true);
-            stepClaimService.markFailed(runId, stepId, fallbackReasonCode, "REPLAN_REQUIRED", message);
+            String finalReasonCode = persistReplanAttempt(runId, stepId, fallbackReasonCode, context);
+            stepClaimService.markFailed(runId, stepId, finalReasonCode, "REPLAN_REQUIRED", message);
             executionRunService.markFailed(runId, "REPLAN_REQUIRED", message);
             addUnique(failed, stepId);
             context.putAttribute("workflow.error", message);
             log.info("[workflow] fallback 不可用后转 REPLAN|runId={} |stepId={} |reasonCode={}",
-                    runId, stepId, fallbackReasonCode);
+                    runId, stepId, finalReasonCode);
             return;
         }
         stepClaimService.markFailed(runId, stepId, fallbackReasonCode, "FALLBACK_UNAVAILABLE", message);
@@ -628,6 +639,18 @@ public class WorkflowOrchestrator {
         int maxRetries = runId == null
                 ? resolveMaxRetries(step)
                 : stepClaimService.getMaxRetries(runId, step.getStepId(), resolveMaxRetries(step));
+        ExecutionRunEntity runEntity = runId == null ? null : executionRunService.findByRunId(runId);
+        ExecutionStepRunEntity stepRunEntity = runId == null ? null : stepClaimService.findStepRun(runId, step.getStepId());
+        ReplanGuardService.BudgetCheckResult budgetResult = replanGuardService.checkBudget(runEntity, stepRunEntity);
+        ReplanEvidenceSnapshot evidenceSnapshot = buildReplanEvidenceSnapshot(context);
+        ReplanGuardService.EvidenceCheckResult evidenceResult = replanGuardService.checkEvidence(step.getCapabilityName(), evidenceSnapshot);
+        boolean nonRetryableReason = replanGuardService.isNonRetryableReason(reasonCode);
+        ReplanChangeProof changeProof = buildReplanChangeProof(step, stepRunEntity, reasonCode, context);
+        boolean noEffectiveChange = changeProof != null && !changeProof.isEffectiveChange();
+        if (context != null) {
+            context.putAttribute("workflow.replan.changeProof." + step.getStepId(), changeProof);
+            context.putAttribute("workflow.replan.evidence." + step.getStepId(), evidenceSnapshot);
+        }
 
         FailureContext failureContext = FailureContext.builder()
                 .errorCategory(resolveErrorCategory(e, reasonCode))
@@ -640,19 +663,148 @@ public class WorkflowOrchestrator {
                 .sideEffect(resolveSideEffect(step))
                 .effectState(resolveEffectState(step))
                 .preferredResumeMode(resolvePreferredResumeMode(step))
+                .replanCountRun(runEntity == null ? 0 : runEntity.getReplanCountRun())
+                .maxReplansPerRun(replanControlProperties.getMaxReplansPerRun())
+                .replanCountStep(stepRunEntity == null ? 0 : stepRunEntity.getReplanCountStep())
+                .maxReplansPerStep(replanControlProperties.getMaxReplansPerStep())
+                .evidenceSufficient(evidenceResult.sufficient())
+                .replanNoEffectiveChange(noEffectiveChange)
+                .replanNonRetryableReason(nonRetryableReason)
                 .build();
 
         DecisionResult decision = decisionTable.resolve(failureContext);
-        log.info("[workflow] failure decision resolved|runId={} |stepId={} |category={} |retry={}/{} |action={} |nextState={} |reason={}",
+        log.info("[workflow] failure decision resolved|runId={} |stepId={} |category={} |retry={}/{} |replanBudgetAllowed={} |evidenceSufficient={} |changeEffective={} |action={} |nextState={} |reason={}",
                 runId,
                 step.getStepId(),
                 failureContext.getErrorCategory(),
                 failureContext.getRetryCount(),
                 failureContext.getMaxRetries(),
+                budgetResult.allowed(),
+                evidenceResult.sufficient(),
+                changeProof == null ? null : changeProof.isEffectiveChange(),
                 decision.getAction(),
                 decision.getNextState(),
                 decision.getReasonCode());
         return decision;
+    }
+
+    /**
+     * Replan 审计回填与预算扣减。
+     * 设计约束：
+     * 1. 先扣 run 级预算，再写 step 级 Replan 快照，失败时透出专用 reasonCode；
+     * 2. 当前版本仅做“审计与预算”落库，不在本方法内执行新计划切换。
+     */
+    private String persistReplanAttempt(String runId, String stepId, String reasonCode, WorkflowContext context) {
+        String normalizedReason = reasonCode == null || reasonCode.isBlank() ? "replan_required" : reasonCode;
+        ExecutionRunEntity runEntity = executionRunService.findByRunId(runId);
+        int activePlanVersion = runEntity == null || runEntity.getActivePlanVersion() == null
+                ? 1
+                : Math.max(1, runEntity.getActivePlanVersion());
+        boolean runBudgetUpdated = replanGuardService.increaseBudgetAfterPlanActivated(runId, activePlanVersion);
+        if (!runBudgetUpdated) {
+            log.warn("[workflow] Replan 回填失败：run 预算 CAS 更新失败|runId={} |stepId={} |activePlanVersion={}",
+                    runId, stepId, activePlanVersion);
+            return "replan_cas_exhausted";
+        }
+        boolean stepRecorded = stepClaimService.recordReplanAttempt(
+                runId,
+                stepId,
+                normalizedReason,
+                resolveReplanSnapshotJson(context, stepId, "workflow.replan.changeProof."),
+                resolveReplanSnapshotJson(context, stepId, "workflow.replan.evidence."),
+                "REPLAN"
+        );
+        if (!stepRecorded) {
+            log.warn("[workflow] Replan 回填失败：step 快照 CAS 更新失败|runId={} |stepId={} |reasonCode={}",
+                    runId, stepId, normalizedReason);
+            return "replan_cas_exhausted";
+        }
+        return normalizedReason;
+    }
+
+    private String resolveReplanSnapshotJson(WorkflowContext context, String stepId, String keyPrefix) {
+        if (context == null || context.getAttributes() == null || stepId == null || keyPrefix == null) {
+            return null;
+        }
+        Object value = context.getAttributes().get(keyPrefix + stepId);
+        if (value == null) {
+            return null;
+        }
+        return safeJson(value);
+    }
+
+    private ReplanChangeProof buildReplanChangeProof(WorkflowStep step,
+                                                     ExecutionStepRunEntity stepRunEntity,
+                                                     String reasonCode,
+                                                     WorkflowContext context) {
+        if (step == null) {
+            return null;
+        }
+        Map<String, Object> previousInput = copyMap(step.getParameters());
+        Map<String, Object> candidateInput = buildCandidateReplanInput(step, stepRunEntity, reasonCode, context);
+        String constraintsDigest = buildConstraintsDigest(step);
+        String depsDigest = buildDepsDigest(step);
+        return replanGuardService.buildChangeProof(
+                step.getCapabilityName(),
+                previousInput,
+                candidateInput,
+                constraintsDigest,
+                depsDigest
+        );
+    }
+
+    private String buildConstraintsDigest(WorkflowStep step) {
+        if (step == null) {
+            return "";
+        }
+        String schema = step.getSchemaVersion() == null ? "" : step.getSchemaVersion();
+        String semantic = step.getSemanticVersion() == null ? "" : step.getSemanticVersion();
+        String doneCheckRef = step.getDoneCheckRef() == null ? "" : step.getDoneCheckRef();
+        String outputSchemaDigest = step.getOutputSchema() == null ? "" : safeJson(step.getOutputSchema());
+        return schema + "|" + semantic + "|" + doneCheckRef + "|" + outputSchemaDigest;
+    }
+
+    private String buildDepsDigest(WorkflowStep step) {
+        if (step == null || step.getDependsOn() == null || step.getDependsOn().isEmpty()) {
+            return "";
+        }
+        List<String> deps = new ArrayList<>(step.getDependsOn());
+        Collections.sort(deps);
+        return String.join(",", deps);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildCandidateReplanInput(WorkflowStep step,
+                                                          ExecutionStepRunEntity stepRunEntity,
+                                                          String reasonCode,
+                                                          WorkflowContext context) {
+        Map<String, Object> candidate = copyMap(step == null ? null : step.getParameters());
+        String stepId = step == null ? null : step.getStepId();
+        if (context != null && context.getAttributes() != null && stepId != null) {
+            Object patch = context.getAttributes().get("workflow.replan.patch." + stepId);
+            if (patch instanceof Map<?, ?> patchMap) {
+                for (Map.Entry<?, ?> entry : patchMap.entrySet()) {
+                    if (entry.getKey() == null) {
+                        continue;
+                    }
+                    candidate.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+                return candidate;
+            }
+        }
+        int nextStepReplanCount = stepRunEntity == null || stepRunEntity.getReplanCountStep() == null
+                ? 1
+                : Math.max(1, stepRunEntity.getReplanCountStep() + 1);
+        candidate.put("_replanAttemptHint", nextStepReplanCount);
+        candidate.put("_replanReasonHint", reasonCode == null ? "replan_required" : reasonCode);
+        return candidate;
+    }
+
+    private Map<String, Object> copyMap(Map<String, Object> source) {
+        if (source == null || source.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        return new LinkedHashMap<>(source);
     }
 
     private void finalizeWorkflow(WorkflowContext context, List<String> completed, List<String> failed) {
@@ -952,6 +1104,110 @@ public class WorkflowOrchestrator {
     private int resolveGlobalDefaultMaxRetries() {
         Integer global = schemaValidationProperties.getGlobalMaxRetries();
         return global == null ? 2 : Math.max(0, global);
+    }
+
+    /**
+     * 解析当前执行使用的计划版本。
+     * 优先级：context 显式设置 > workflow metadata > 默认 1。
+     */
+    private int resolvePlanVersion(WorkflowDefinition workflow, WorkflowContext context) {
+        int fromContext = parsePositiveInt(context == null ? null : context.getAttributes().get("workflow.active.plan.version"));
+        if (fromContext > 0) {
+            return fromContext;
+        }
+        int fromMetadata = parsePositiveInt(workflow == null || workflow.getMetadata() == null
+                ? null
+                : workflow.getMetadata().get("planVersion"));
+        if (fromMetadata > 0) {
+            if (context != null) {
+                context.putAttribute("workflow.active.plan.version", fromMetadata);
+            }
+            return fromMetadata;
+        }
+        if (context != null) {
+            context.putAttribute("workflow.active.plan.version", 1);
+        }
+        return 1;
+    }
+
+    private int parsePositiveInt(Object value) {
+        if (value == null) {
+            return -1;
+        }
+        if (value instanceof Number number) {
+            int v = number.intValue();
+            return v > 0 ? v : -1;
+        }
+        try {
+            int parsed = Integer.parseInt(String.valueOf(value));
+            return parsed > 0 ? parsed : -1;
+        } catch (Exception ignore) {
+            return -1;
+        }
+    }
+
+    /**
+     * EvidenceGate v1 只读取已有流水线统计字段，不引入新算法。
+     */
+    private ReplanEvidenceSnapshot buildReplanEvidenceSnapshot(WorkflowContext context) {
+        if (context == null || context.getAttributes() == null) {
+            return ReplanEvidenceSnapshot.builder()
+                    .sourceCount(0)
+                    .coverageRate(0.0d)
+                    .clusterCount(0)
+                    .build();
+        }
+        Map<String, Object> attrs = context.getAttributes();
+        int sourceCount = parsePositiveIntOrZero(
+                attrs.get("workflow.evidence.normalized.count"),
+                attrs.get("workflow.evidence.raw.count")
+        );
+        double coverageRate = parseDoubleOrZero(
+                attrs.get("workflow.evidence.coverage.rate"),
+                attrs.get("workflow.evidence.coverageRate")
+        );
+        int clusterCount = parsePositiveIntOrZero(
+                attrs.get("workflow.evidence.cluster.count"),
+                attrs.get("workflow.evidence.clusterCount")
+        );
+        return ReplanEvidenceSnapshot.builder()
+                .sourceCount(sourceCount)
+                .coverageRate(coverageRate)
+                .clusterCount(clusterCount)
+                .build();
+    }
+
+    private int parsePositiveIntOrZero(Object... values) {
+        if (values == null) {
+            return 0;
+        }
+        for (Object value : values) {
+            int parsed = parsePositiveInt(value);
+            if (parsed > 0) {
+                return parsed;
+            }
+        }
+        return 0;
+    }
+
+    private double parseDoubleOrZero(Object... values) {
+        if (values == null) {
+            return 0.0d;
+        }
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+            if (value instanceof Number number) {
+                return Math.max(0.0d, number.doubleValue());
+            }
+            try {
+                return Math.max(0.0d, Double.parseDouble(String.valueOf(value)));
+            } catch (Exception ignore) {
+                // try next
+            }
+        }
+        return 0.0d;
     }
 
     private ToolFailureCategory resolveToolFailureCategory(Exception e, String reasonCode) {

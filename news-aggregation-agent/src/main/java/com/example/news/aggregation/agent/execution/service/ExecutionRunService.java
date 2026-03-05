@@ -3,7 +3,10 @@ package com.example.news.aggregation.agent.execution.service;
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.enums.RunStatus;
+import com.example.news.aggregation.agent.execution.model.ExecutionReplaySnapshot;
+import com.example.news.aggregation.agent.execution.repo.ExecutionEventLogRepository;
 import com.example.news.aggregation.agent.execution.repo.ExecutionRunRepository;
+import com.example.news.aggregation.agent.execution.repo.ExecutionStepRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -16,7 +19,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Run aggregate service: create/replay execution runs and transition run state.
+ * Run 聚合服务：负责 run 创建/回放、状态迁移、计划版本切换等持久化行为。
  */
 @Slf4j
 @Service
@@ -24,6 +27,8 @@ import java.util.UUID;
 public class ExecutionRunService {
 
     private final ExecutionRunRepository runRepository;
+    private final ExecutionStepRunRepository stepRunRepository;
+    private final ExecutionEventLogRepository eventLogRepository;
     private final ExecutionPersistenceProperties properties;
     private final ExecutionEventService eventService;
 
@@ -58,6 +63,8 @@ public class ExecutionRunService {
         entity.setRequestDedupeKey(requestDedupeKey);
         entity.setPlanHash(planHash);
         entity.setPlanId(planId);
+        entity.setActivePlanVersion(1);
+        entity.setReplanCountRun(0);
         entity.setStatus(RunStatus.PENDING.name());
         entity.setStartedAt(new Date());
 
@@ -111,6 +118,29 @@ public class ExecutionRunService {
         return runRepository.findByRunId(runId);
     }
 
+    /**
+     * 构建 run 级回放快照，聚合 run、step_run、event_log 三类持久化数据。
+     */
+    public ExecutionReplaySnapshot buildReplaySnapshot(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return null;
+        }
+        ExecutionRunEntity run = runRepository.findByRunId(runId);
+        if (run == null) {
+            return null;
+        }
+        ExecutionReplaySnapshot snapshot = ExecutionReplaySnapshot.builder()
+                .run(run)
+                .stepRuns(stepRunRepository.findByRunId(runId))
+                .events(eventLogRepository.listByRunId(runId))
+                .build();
+        int stepCount = snapshot.getStepRuns() == null ? 0 : snapshot.getStepRuns().size();
+        int eventCount = snapshot.getEvents() == null ? 0 : snapshot.getEvents().size();
+        log.info("[execution-run] 已生成运行回放快照|runId={} |stepCount={} |eventCount={}",
+                runId, stepCount, eventCount);
+        return snapshot;
+    }
+
     public boolean markRunning(String runId, String currentStep) {
         return updateStatusWithRetry(runId, RunStatus.RUNNING.name(), currentStep, null, null, null);
     }
@@ -129,6 +159,52 @@ public class ExecutionRunService {
 
     public boolean markAborted(String runId, String reasonCode, String errorMessage) {
         return updateStatusWithRetry(runId, RunStatus.ABORTED.name(), null, reasonCode, errorMessage, new Date());
+    }
+
+    /**
+     * 仅在“新计划已写入且需要激活”的场景调用。
+     * 方法职责：在 CAS 语义下切换 active_plan_version，并在切换成功后扣减 run 级 replan 预算。
+     */
+    public boolean switchActivePlanVersionAndIncreaseReplanCount(String runId, int activePlanVersion) {
+        int target = Math.max(1, activePlanVersion);
+        for (int i = 0; i < 3; i++) {
+            ExecutionRunEntity current = runRepository.findByRunId(runId);
+            if (current == null) {
+                return false;
+            }
+            Integer expected = current.getLockVersion() == null ? 0 : current.getLockVersion();
+            int rows = runRepository.switchActivePlanVersionAndIncreaseReplanCountWithCas(runId, expected, target);
+            if (rows > 0) {
+                int supersededSteps = stepRunRepository.supersedePendingStepsNotInPlanVersion(runId, target);
+                eventService.record(
+                        runId,
+                        null,
+                        "RUN_REPLAN_ACTIVATED",
+                        current.getStatus(),
+                        current.getStatus(),
+                        "active_plan_version_switched",
+                        "switch active_plan_version and increase replan_count_run",
+                        "{\"from\":" + (current.getActivePlanVersion() == null ? 1 : current.getActivePlanVersion())
+                                + ",\"to\":" + target + "}"
+                );
+                if (supersededSteps > 0) {
+                    eventService.record(
+                            runId,
+                            null,
+                            "RUN_PLAN_SUPERSEDED",
+                            current.getStatus(),
+                            current.getStatus(),
+                            "plan_superseded",
+                            "supersede pending steps from old plan versions",
+                            "{\"activePlanVersion\":" + target + ",\"supersededCount\":" + supersededSteps + "}"
+                    );
+                    log.info("[execution-run] 计划切换后已收敛旧计划未开始步骤|runId={} |activePlanVersion={} |supersededCount={}",
+                            runId, target, supersededSteps);
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean updateStatusWithRetry(String runId,

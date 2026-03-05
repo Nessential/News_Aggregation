@@ -42,4 +42,14 @@ public class ExecutionRunRepository {
                 finishedAt
         );
     }
+
+    public int switchActivePlanVersionAndIncreaseReplanCountWithCas(String runId,
+                                                                     Integer expectedLockVersion,
+                                                                     Integer activePlanVersion) {
+        return runMapper.switchActivePlanVersionAndIncreaseReplanCountWithCas(
+                runId,
+                expectedLockVersion,
+                activePlanVersion
+        );
+    }
 }

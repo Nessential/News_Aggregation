@@ -51,6 +51,14 @@ public class StepClaimService {
                                 List<WorkflowStep> steps,
                                 int defaultMaxRetries,
                                 int defaultMaxRecoveryAttempts) {
+        prepareStepRuns(runId, steps, defaultMaxRetries, defaultMaxRecoveryAttempts, 1);
+    }
+
+    public void prepareStepRuns(String runId,
+                                List<WorkflowStep> steps,
+                                int defaultMaxRetries,
+                                int defaultMaxRecoveryAttempts,
+                                int planVersion) {
         if (steps == null || steps.isEmpty()) {
             return;
         }
@@ -58,7 +66,7 @@ public class StepClaimService {
             if (step == null || step.getStepId() == null || step.getStepId().isBlank()) {
                 continue;
             }
-            prepareStepRun(runId, step, defaultMaxRetries, defaultMaxRecoveryAttempts);
+            prepareStepRun(runId, step, defaultMaxRetries, defaultMaxRecoveryAttempts, planVersion);
         }
     }
 
@@ -66,9 +74,18 @@ public class StepClaimService {
                                WorkflowStep step,
                                int defaultMaxRetries,
                                int defaultMaxRecoveryAttempts) {
+        prepareStepRun(runId, step, defaultMaxRetries, defaultMaxRecoveryAttempts, 1);
+    }
+
+    public void prepareStepRun(String runId,
+                               WorkflowStep step,
+                               int defaultMaxRetries,
+                               int defaultMaxRecoveryAttempts,
+                               int planVersion) {
         ExecutionStepRunEntity entity = new ExecutionStepRunEntity();
         entity.setRunId(runId);
         entity.setStepId(step.getStepId());
+        entity.setPlanVersion(Math.max(1, planVersion));
         entity.setCapabilityName(step.getCapabilityName());
         entity.setActiveCapabilityName(step.getCapabilityName());
         entity.setStatus(StepStatus.PENDING.name());
@@ -85,6 +102,11 @@ public class StepClaimService {
         entity.setSelectionReasonCode("initial_primary");
         entity.setCircuitStateSnapshot(null);
         entity.setFallbackCandidatesJson(toJson(resolveFallbackTools(step)));
+        entity.setReplanCountStep(0);
+        entity.setLastReplanReasonCode(null);
+        entity.setChangeProofSnapshot(null);
+        entity.setEvidenceSnapshot(null);
+        entity.setReplanDecisionAction(null);
         entity.setReplanAllowed(step.getFailurePolicy() != null ? step.getFailurePolicy().isReplanAllowed() : null);
         entity.setNeedUserInputOnFailure(step.getFailurePolicy() != null
                 ? step.getFailurePolicy().isNeedUserInputOnFailure()
@@ -461,6 +483,45 @@ public class StepClaimService {
     }
 
     /**
+     * 记录一次 Replan 尝试（step 级计数 + 快照）。
+     * 说明：
+     * 1. 仅用于“进入 REPLAN 分支”时的审计回填；
+     * 2. 使用 CAS + 有限重试，避免并发写入导致计数丢失；
+     * 3. 该计数不会替代 run 级预算，run 级预算由 ExecutionRunService 单独管理。
+     */
+    public boolean recordReplanAttempt(String runId,
+                                       String stepId,
+                                       String reasonCode,
+                                       String changeProofSnapshot,
+                                       String evidenceSnapshot,
+                                       String replanDecisionAction) {
+        int maxRetries = 3;
+        for (int i = 0; i < maxRetries; i++) {
+            ExecutionStepRunEntity current = stepRunRepository.findByRunIdAndStepId(runId, stepId);
+            if (current == null) {
+                return false;
+            }
+            int rows = stepRunRepository.recordReplanAttemptWithCas(
+                    runId,
+                    stepId,
+                    defaultVersion(current.getLockVersion()),
+                    nonBlank(reasonCode, "replan_required"),
+                    changeProofSnapshot,
+                    evidenceSnapshot,
+                    nonBlank(replanDecisionAction, "REPLAN")
+            );
+            if (rows > 0) {
+                log.info("[step-claim] Replan 回填成功|runId={} |stepId={} |reasonCode={} |decisionAction={}",
+                        runId, stepId, reasonCode, replanDecisionAction);
+                return true;
+            }
+        }
+        log.warn("[step-claim] Replan 回填失败：CAS 重试耗尽|runId={} |stepId={} |reasonCode={} |decisionAction={}",
+                runId, stepId, reasonCode, replanDecisionAction);
+        return false;
+    }
+
+    /**
      * 通过 CAS 持久化工具选择快照，保障重放与排障可追溯。
      */
     public boolean updateSelectionSnapshot(String runId,
@@ -503,6 +564,16 @@ public class StepClaimService {
 
     public List<ExecutionStepRunEntity> listByRunId(String runId) {
         return stepRunRepository.findByRunId(runId);
+    }
+
+    public List<ExecutionStepRunEntity> listByRunIdAndPlanVersion(String runId, Integer planVersion) {
+        List<ExecutionStepRunEntity> all = stepRunRepository.findByRunId(runId);
+        if (all == null || all.isEmpty() || planVersion == null || planVersion <= 0) {
+            return all;
+        }
+        return all.stream()
+                .filter(item -> item != null && item.getPlanVersion() != null && item.getPlanVersion().equals(planVersion))
+                .toList();
     }
 
     /**
@@ -577,17 +648,21 @@ public class StepClaimService {
         if (entity == null) {
             return Map.of();
         }
-        return Map.of(
-                "attempt", entity.getAttempt() == null ? 0 : entity.getAttempt(),
-                "maxRetries", entity.getMaxRetries() == null ? 0 : entity.getMaxRetries(),
-                "status", Objects.toString(entity.getStatus(), ""),
-                "recoveryAttempt", entity.getRecoveryAttempt() == null ? 0 : entity.getRecoveryAttempt(),
-                "maxRecoveryAttempts", entity.getMaxRecoveryAttempts() == null ? 0 : entity.getMaxRecoveryAttempts(),
-                "capabilityName", nullToEmpty(entity.getCapabilityName()),
-                "activeCapabilityName", nullToEmpty(entity.getActiveCapabilityName()),
-                "selectedTool", nullToEmpty(entity.getSelectedTool()),
-                "selectionReasonCode", nullToEmpty(entity.getSelectionReasonCode())
-        );
+        Map<String, Object> view = new java.util.LinkedHashMap<>();
+        view.put("attempt", entity.getAttempt() == null ? 0 : entity.getAttempt());
+        view.put("maxRetries", entity.getMaxRetries() == null ? 0 : entity.getMaxRetries());
+        view.put("status", Objects.toString(entity.getStatus(), ""));
+        view.put("recoveryAttempt", entity.getRecoveryAttempt() == null ? 0 : entity.getRecoveryAttempt());
+        view.put("maxRecoveryAttempts", entity.getMaxRecoveryAttempts() == null ? 0 : entity.getMaxRecoveryAttempts());
+        view.put("capabilityName", nullToEmpty(entity.getCapabilityName()));
+        view.put("activeCapabilityName", nullToEmpty(entity.getActiveCapabilityName()));
+        view.put("selectedTool", nullToEmpty(entity.getSelectedTool()));
+        view.put("selectionReasonCode", nullToEmpty(entity.getSelectionReasonCode()));
+        view.put("planVersion", entity.getPlanVersion() == null ? 1 : entity.getPlanVersion());
+        view.put("replanCountStep", entity.getReplanCountStep() == null ? 0 : entity.getReplanCountStep());
+        view.put("lastReplanReasonCode", nullToEmpty(entity.getLastReplanReasonCode()));
+        view.put("replanDecisionAction", nullToEmpty(entity.getReplanDecisionAction()));
+        return view;
     }
 
     public String getEffectiveCapability(String runId, String stepId) {

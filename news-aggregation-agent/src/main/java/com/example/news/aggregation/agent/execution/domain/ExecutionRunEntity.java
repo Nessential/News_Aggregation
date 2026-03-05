@@ -8,7 +8,7 @@ import lombok.Setter;
 import java.util.Date;
 
 /**
- * 执行运行主记录。
+ * 运行主记录。
  */
 @Getter
 @Setter
@@ -25,6 +25,10 @@ public class ExecutionRunEntity extends BaseEntity {
     private String currentStep;
     private String errorCode;
     private String errorMessage;
+    /** 当前生效计划版本，仅该版本 step 可参与 claim。 */
+    private Integer activePlanVersion;
+    /** run 级重规划次数。 */
+    private Integer replanCountRun;
     private Date startedAt;
     private Date finishedAt;
 }
