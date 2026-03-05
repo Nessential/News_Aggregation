@@ -118,6 +118,17 @@ app:
       global-fallback-tools: []
       quality-gate-enabled: true
 
+    tool-selector:
+      enabled: true
+      health-window-size: 20
+      health-min-samples: 5
+      primary-infra-fail-rate-threshold: 0.6
+      primary-infra-fail-count-threshold: 3
+      circuit-open-seconds: 30
+      half-open-owner-lease-seconds: 10
+      cas-max-retries: 3
+      capability-fallbacks: {}
+
     session:
       timeout-minutes: 30
       max-history-size: 50

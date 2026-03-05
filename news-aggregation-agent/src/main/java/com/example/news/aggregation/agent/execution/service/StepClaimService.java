@@ -5,19 +5,24 @@ import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntit
 import com.example.news.aggregation.agent.execution.enums.StepStatus;
 import com.example.news.aggregation.agent.execution.repo.ExecutionStepRunRepository;
 import com.example.news.aggregation.agent.workflow.WorkflowStep;
+import com.example.news.aggregation.agent.workflow.selector.ToolFailureCategory;
+import com.example.news.aggregation.agent.workflow.selector.ToolSelectionResult;
+import com.example.news.aggregation.agent.workflow.selector.ToolSelectorV1;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * Manages step-level execution state (claim/retry/recovery/events).
+ * 管理 step 级执行状态（抢占、重试、回填、事件记录）。
  */
 @Slf4j
 @Service
@@ -27,8 +32,20 @@ public class StepClaimService {
     private final ExecutionStepRunRepository stepRunRepository;
     private final ExecutionPersistenceProperties properties;
     private final ExecutionEventService eventService;
+    @Autowired(required = false)
+    private ToolSelectorV1 toolSelector;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 回退调度结果：
+     * selectedTool 为空表示未能安排回退，failureReasonCode 用于排障透出。
+     */
+    public record FallbackScheduleResult(String selectedTool, String failureReasonCode) {
+        public boolean hasSelectedTool() {
+            return selectedTool != null && !selectedTool.isBlank();
+        }
+    }
 
     public void prepareStepRuns(String runId,
                                 List<WorkflowStep> steps,
@@ -64,6 +81,10 @@ public class StepClaimService {
         entity.setOutputJson(null);
         entity.setSideEffect(step.getSideEffect());
         entity.setFallbackToolsJson(toJson(resolveFallbackTools(step)));
+        entity.setSelectedTool(step.getCapabilityName());
+        entity.setSelectionReasonCode("initial_primary");
+        entity.setCircuitStateSnapshot(null);
+        entity.setFallbackCandidatesJson(toJson(resolveFallbackTools(step)));
         entity.setReplanAllowed(step.getFailurePolicy() != null ? step.getFailurePolicy().isReplanAllowed() : null);
         entity.setNeedUserInputOnFailure(step.getFailurePolicy() != null
                 ? step.getFailurePolicy().isNeedUserInputOnFailure()
@@ -263,26 +284,70 @@ public class StepClaimService {
     }
 
     /**
-     * Schedule fallback retry: switch activeCapabilityName to the next available tool and set step to PENDING.
+     * 基于选择器结果安排回退重试，并将 step 回到 PENDING。
      */
     public String scheduleFallbackRetry(String runId,
                                         String stepId,
                                         String reasonCode,
                                         String errorCode,
                                         String errorMessage) {
+        return scheduleFallbackRetryDetailed(runId, stepId, reasonCode, errorCode, errorMessage).selectedTool();
+    }
+
+    public FallbackScheduleResult scheduleFallbackRetryDetailed(String runId,
+                                                                String stepId,
+                                                                String reasonCode,
+                                                                String errorCode,
+                                                                String errorMessage) {
         ExecutionStepRunEntity current = stepRunRepository.findByRunIdAndStepId(runId, stepId);
         if (current == null) {
-            return null;
+            log.warn("[step-claim] 回退调度失败：step_run 不存在|runId={} |stepId={}", runId, stepId);
+            return new FallbackScheduleResult(null, "fallback_unavailable");
         }
         int attempt = current.getAttempt() == null ? 0 : current.getAttempt();
         int maxRetries = current.getMaxRetries() == null ? 0 : current.getMaxRetries();
         if (attempt >= maxRetries) {
-            return null;
+            log.warn("[step-claim] 回退调度失败：重试次数已耗尽|runId={} |stepId={} |attempt={}/{}",
+                    runId, stepId, attempt, maxRetries);
+            return new FallbackScheduleResult(null, "fallback_unavailable");
         }
 
         String nextCapability = resolveNextFallbackCapability(current);
+        String selectionReasonCode = "fallback_tool";
+        String circuitSnapshot = null;
+        String fallbackCandidates = null;
+        if (toolSelector != null) {
+            ToolSelectionResult result = toolSelector.select(
+                    nonBlank(current.getCapabilityName(), current.getActiveCapabilityName()),
+                    nonBlank(current.getCapabilityName(), current.getActiveCapabilityName()),
+                    readFallbackTools(current.getFallbackToolsJson()),
+                    current.getSelectedTool(),
+                    true,
+                    true
+            );
+            if (result == null || !result.hasSelectedTool()) {
+                String failureReasonCode = deriveFallbackUnavailableReason(result == null ? null : result.getReasonCode());
+                updateSelectionSnapshotWithRetry(
+                        runId,
+                        stepId,
+                        nonBlank(current.getSelectedTool(), resolveActiveCapability(current)),
+                        failureReasonCode,
+                        result == null ? null : toJson(result.getCircuitStateByTool()),
+                        result == null ? null : toJson(result.getCandidates())
+                );
+                log.warn("[step-claim] 回退调度失败：选择器未选出可用工具|runId={} |stepId={} |reasonCode={}",
+                        runId, stepId, failureReasonCode);
+                return new FallbackScheduleResult(null, failureReasonCode);
+            }
+            nextCapability = result.getSelectedTool();
+            selectionReasonCode = nonBlank(result.getReasonCode(), "fallback_tool");
+            circuitSnapshot = toJson(result.getCircuitStateByTool());
+            fallbackCandidates = toJson(result.getCandidates());
+        }
+
         if (nextCapability == null || nextCapability.isBlank()) {
-            return null;
+            log.warn("[step-claim] 回退调度失败：未解析到候选工具|runId={} |stepId={}", runId, stepId);
+            return new FallbackScheduleResult(null, deriveFallbackUnavailableReason(selectionReasonCode));
         }
 
         int rows = stepRunRepository.markRetryPendingSwitchCapabilityWithCas(
@@ -290,11 +355,19 @@ public class StepClaimService {
                 stepId,
                 defaultVersion(current.getLockVersion()),
                 nextCapability,
-                reasonCode,
+                selectionReasonCode,
                 errorCode,
                 errorMessage
         );
         if (rows > 0) {
+            updateSelectionSnapshotWithRetry(
+                    runId,
+                    stepId,
+                    nextCapability,
+                    selectionReasonCode,
+                    circuitSnapshot,
+                    fallbackCandidates
+            );
             eventService.record(
                     runId,
                     stepId,
@@ -306,9 +379,72 @@ public class StepClaimService {
                     "{\"fromTool\":\"" + nullToEmpty(resolveActiveCapability(current))
                             + "\",\"toTool\":\"" + nextCapability + "\"}"
             );
-            return nextCapability;
+            log.info("[step-claim] 回退调度成功|runId={} |stepId={} |toTool={} |selectionReason={}",
+                    runId, stepId, nextCapability, selectionReasonCode);
+            return new FallbackScheduleResult(nextCapability, null);
         }
-        return null;
+        log.warn("[step-claim] 回退调度失败：CAS 冲突耗尽|runId={} |stepId={} |reasonCode={}",
+                runId, stepId, selectionReasonCode);
+        return new FallbackScheduleResult(null, deriveFallbackUnavailableReason(selectionReasonCode));
+    }
+
+    /**
+     * 执行前选择工具，并通过 CAS 持久化选择快照。
+     */
+    public ToolSelectionResult selectToolForExecution(String runId,
+                                                      WorkflowStep step,
+                                                      boolean forceReselect,
+                                                      boolean fallbackAction) {
+        if (step == null || runId == null || runId.isBlank()) {
+            log.warn("[step-claim] 选择工具失败：入参不完整|runId={} |stepId={}",
+                    runId, step == null ? null : step.getStepId());
+            return null;
+        }
+        ExecutionStepRunEntity current = stepRunRepository.findByRunIdAndStepId(runId, step.getStepId());
+        if (current == null) {
+            log.warn("[step-claim] 选择工具失败：step_run 不存在|runId={} |stepId={}", runId, step.getStepId());
+            return null;
+        }
+        String primaryTool = nonBlank(current.getCapabilityName(), step.getCapabilityName());
+        List<String> fallbackTools = mergeFallbackTools(step, current);
+        String selected = nonBlank(current.getSelectedTool(), resolveActiveCapability(current));
+        ToolSelectionResult result;
+        if (toolSelector == null) {
+            log.warn("[step-claim] 选择器未启用，使用已选工具或主工具兜底|runId={} |stepId={}", runId, step.getStepId());
+            result = ToolSelectionResult.builder()
+                    .selectedTool(nonBlank(selected, primaryTool))
+                    .reasonCode("selector_unavailable")
+                    .candidates(buildOrderedCandidates(primaryTool, fallbackTools))
+                    .circuitStateByTool(Map.of())
+                    .healthSnapshotByTool(Map.of())
+                    .build();
+        } else {
+            result = toolSelector.select(
+                    nonBlank(current.getCapabilityName(), step.getCapabilityName()),
+                    primaryTool,
+                    fallbackTools,
+                    selected,
+                    forceReselect,
+                    fallbackAction
+            );
+        }
+        if (result == null || !result.hasSelectedTool()) {
+            log.warn("[step-claim] 未选出可执行工具|runId={} |stepId={} |reasonCode={}",
+                    runId, step.getStepId(), result == null ? null : result.getReasonCode());
+            return result;
+        }
+        updateActiveSelectionSnapshotWithRetry(
+                runId,
+                step.getStepId(),
+                result.getSelectedTool(),
+                result.getSelectedTool(),
+                nonBlank(result.getReasonCode(), "tool_selected"),
+                toJson(result.getCircuitStateByTool()),
+                toJson(result.getCandidates())
+        );
+        log.info("[step-claim] 工具选择完成|runId={} |stepId={} |selectedTool={} |reasonCode={}",
+                runId, step.getStepId(), result.getSelectedTool(), result.getReasonCode());
+        return result;
     }
 
     public boolean updateOutputSnapshot(String runId, String stepId, String outputJson) {
@@ -322,6 +458,43 @@ public class StepClaimService {
                 defaultVersion(current.getLockVersion()),
                 outputJson
         ) > 0;
+    }
+
+    /**
+     * 通过 CAS 持久化工具选择快照，保障重放与排障可追溯。
+     */
+    public boolean updateSelectionSnapshot(String runId,
+                                           String stepId,
+                                           String selectedTool,
+                                           String selectionReasonCode,
+                                           String circuitStateSnapshot,
+                                           String fallbackCandidatesJson) {
+        return updateSelectionSnapshotWithRetry(
+                runId,
+                stepId,
+                selectedTool,
+                selectionReasonCode,
+                circuitStateSnapshot,
+                fallbackCandidatesJson
+        );
+    }
+
+    public void recordToolSuccess(String selectedTool, String capability, long latencyMs) {
+        if (toolSelector == null || selectedTool == null || selectedTool.isBlank()) {
+            return;
+        }
+        toolSelector.recordSuccess(selectedTool, capability, latencyMs);
+    }
+
+    public void recordToolFailure(String selectedTool,
+                                  String capability,
+                                  ToolFailureCategory failureCategory,
+                                  long latencyMs,
+                                  String reasonCode) {
+        if (toolSelector == null || selectedTool == null || selectedTool.isBlank()) {
+            return;
+        }
+        toolSelector.recordFailure(selectedTool, capability, failureCategory, latencyMs, reasonCode);
     }
 
     public List<ExecutionStepRunEntity> listExpiredRunning(int limit) {
@@ -411,7 +584,9 @@ public class StepClaimService {
                 "recoveryAttempt", entity.getRecoveryAttempt() == null ? 0 : entity.getRecoveryAttempt(),
                 "maxRecoveryAttempts", entity.getMaxRecoveryAttempts() == null ? 0 : entity.getMaxRecoveryAttempts(),
                 "capabilityName", nullToEmpty(entity.getCapabilityName()),
-                "activeCapabilityName", nullToEmpty(entity.getActiveCapabilityName())
+                "activeCapabilityName", nullToEmpty(entity.getActiveCapabilityName()),
+                "selectedTool", nullToEmpty(entity.getSelectedTool()),
+                "selectionReasonCode", nullToEmpty(entity.getSelectionReasonCode())
         );
     }
 
@@ -419,6 +594,9 @@ public class StepClaimService {
         ExecutionStepRunEntity entity = findStepRun(runId, stepId);
         if (entity == null) {
             return null;
+        }
+        if (entity.getSelectedTool() != null && !entity.getSelectedTool().isBlank()) {
+            return entity.getSelectedTool();
         }
         return resolveActiveCapability(entity);
     }
@@ -440,6 +618,36 @@ public class StepClaimService {
                 .stream()
                 .filter(item -> item != null && !item.isBlank())
                 .toList();
+    }
+
+    private List<String> mergeFallbackTools(WorkflowStep step, ExecutionStepRunEntity entity) {
+        List<String> merged = new ArrayList<>();
+        for (String fallback : resolveFallbackTools(step)) {
+            if (!merged.contains(fallback)) {
+                merged.add(fallback);
+            }
+        }
+        for (String fallback : readFallbackTools(entity == null ? null : entity.getFallbackToolsJson())) {
+            if (!merged.contains(fallback)) {
+                merged.add(fallback);
+            }
+        }
+        return merged;
+    }
+
+    private List<String> buildOrderedCandidates(String primaryTool, List<String> fallbackTools) {
+        List<String> ordered = new ArrayList<>();
+        if (primaryTool != null && !primaryTool.isBlank()) {
+            ordered.add(primaryTool);
+        }
+        if (fallbackTools != null) {
+            for (String fallback : fallbackTools) {
+                if (fallback != null && !fallback.isBlank() && !ordered.contains(fallback)) {
+                    ordered.add(fallback);
+                }
+            }
+        }
+        return ordered;
     }
 
     private String resolveNextFallbackCapability(ExecutionStepRunEntity entity) {
@@ -498,6 +706,70 @@ public class StepClaimService {
         return entity.getCapabilityName();
     }
 
+    private boolean updateSelectionSnapshotWithRetry(String runId,
+                                                     String stepId,
+                                                     String selectedTool,
+                                                     String selectionReasonCode,
+                                                     String circuitStateSnapshot,
+                                                     String fallbackCandidatesJson) {
+        // 状态迁移写入：使用有限次 read-modify-write 重试，避免并发下丢失关键选择快照。
+        int maxRetries = 3;
+        for (int i = 0; i < maxRetries; i++) {
+            ExecutionStepRunEntity current = stepRunRepository.findByRunIdAndStepId(runId, stepId);
+            if (current == null) {
+                return false;
+            }
+            int rows = stepRunRepository.updateSelectionSnapshotWithCas(
+                    runId,
+                    stepId,
+                    defaultVersion(current.getLockVersion()),
+                    selectedTool,
+                    selectionReasonCode,
+                    circuitStateSnapshot,
+                    fallbackCandidatesJson
+            );
+            if (rows > 0) {
+                return true;
+            }
+        }
+        log.warn("[step-claim] 选择快照写入失败：CAS 重试耗尽|runId={} |stepId={} |selectedTool={} |reasonCode={}",
+                runId, stepId, selectedTool, selectionReasonCode);
+        return false;
+    }
+
+    private boolean updateActiveSelectionSnapshotWithRetry(String runId,
+                                                           String stepId,
+                                                           String activeCapabilityName,
+                                                           String selectedTool,
+                                                           String selectionReasonCode,
+                                                           String circuitStateSnapshot,
+                                                           String fallbackCandidatesJson) {
+        // activeCapability 与 selectedTool 需要同事务语义更新，失败时同样有限重试。
+        int maxRetries = 3;
+        for (int i = 0; i < maxRetries; i++) {
+            ExecutionStepRunEntity current = stepRunRepository.findByRunIdAndStepId(runId, stepId);
+            if (current == null) {
+                return false;
+            }
+            int rows = stepRunRepository.updateActiveSelectionSnapshotWithCas(
+                    runId,
+                    stepId,
+                    defaultVersion(current.getLockVersion()),
+                    activeCapabilityName,
+                    selectedTool,
+                    selectionReasonCode,
+                    circuitStateSnapshot,
+                    fallbackCandidatesJson
+            );
+            if (rows > 0) {
+                return true;
+            }
+        }
+        log.warn("[step-claim] 活跃工具快照写入失败：CAS 重试耗尽|runId={} |stepId={} |activeTool={} |selectedTool={}",
+                runId, stepId, activeCapabilityName, selectedTool);
+        return false;
+    }
+
     private String toJson(Object value) {
         if (value == null) {
             return null;
@@ -516,5 +788,18 @@ public class StepClaimService {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String nonBlank(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private String deriveFallbackUnavailableReason(String reasonCode) {
+        // 仅保留可排障的专用原因，其余统一归并为 fallback_unavailable。
+        String normalized = reasonCode == null ? "" : reasonCode.toLowerCase(Locale.ROOT);
+        if (normalized.contains("cas_exhausted")) {
+            return "fallback_cas_exhausted";
+        }
+        return "fallback_unavailable";
     }
 }

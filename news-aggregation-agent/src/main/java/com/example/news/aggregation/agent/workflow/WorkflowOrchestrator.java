@@ -12,6 +12,8 @@ import com.example.news.aggregation.agent.workflow.validation.SchemaValidationPr
 import com.example.news.aggregation.agent.workflow.validation.ToolInputValidator;
 import com.example.news.aggregation.agent.workflow.validation.ToolOutputValidator;
 import com.example.news.aggregation.agent.workflow.validation.ToolValidationException;
+import com.example.news.aggregation.agent.workflow.selector.ToolFailureCategory;
+import com.example.news.aggregation.agent.workflow.selector.ToolSelectionResult;
 import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
 import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.FailurePolicy;
@@ -35,7 +37,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Workflow executor based on static plan and runtime decision rules.
+ * 基于静态执行计划与运行时决策表的工作流执行器。
  */
 @Slf4j
 @Service
@@ -244,7 +246,6 @@ public class WorkflowOrchestrator {
                              boolean failFast) {
         String runId = context.getRunId();
         String stepId = step.getStepId();
-        WorkflowStep runtimeStep = resolveRuntimeStep(step, runId, stepId);
 
         if (!stepClaimService.claimStepCas(runId, stepId)) {
             // Step claim failed: treat as unclaimed to keep flow idempotent and observable.
@@ -252,14 +253,37 @@ public class WorkflowOrchestrator {
             return;
         }
 
+        ToolSelectionResult selection = stepClaimService.selectToolForExecution(
+                runId,
+                step,
+                false,
+                false
+        );
+        if (selection == null || !selection.hasSelectedTool()) {
+            log.warn("[workflow] 步骤无可用工具，转入 fallback_unavailable 分流|runId={} |stepId={} |reasonCode={}",
+                    runId, stepId, selection == null ? null : selection.getReasonCode());
+            handleFallbackUnavailable(
+                    step,
+                    context,
+                    new IllegalStateException("fallback_unavailable"),
+                    failed,
+                    selection == null ? null : selection.getReasonCode()
+            );
+            return;
+        }
+
+        WorkflowStep runtimeStep = copyStep(step);
+        runtimeStep.setCapabilityName(selection.getSelectedTool());
         executionRunService.markRunning(runId, stepId);
+        applySelectionToContext(context, stepId, selection);
         context.putAttribute("workflow.runtime.step." + stepId, stepClaimService.buildStepRuntimeView(runId, stepId));
         StepHeartbeat heartbeat = startHeartbeat(runId, stepId);
 
         String effectKey = null;
         String providerTrace = null;
+        long startedAt = System.currentTimeMillis();
         try {
-            log.info("[workflow] step execution started|runId={} |stepId={} |capability={} |sideEffect={}",
+            log.info("[workflow] 步骤开始执行|runId={} |stepId={} |capability={} |sideEffect={}",
                     runId, stepId, runtimeStep.getCapabilityName(), runtimeStep.getSideEffect());
 
             if (isWriteSideEffect(runtimeStep)) {
@@ -281,7 +305,7 @@ public class WorkflowOrchestrator {
                     context.putAttribute("workflow.effect.providerTrace." + stepId, providerTrace);
                 }
                 if (EffectStatus.APPLIED.name().equals(effectStatus)) {
-                    log.info("[workflow] effect latch already applied, skip duplicate side effect|runId={} |stepId={} |effectKey={}",
+                    log.info("[workflow] 副作用幂等闩锁已是 APPLIED，跳过重复执行|runId={} |stepId={} |effectKey={}",
                             runId, stepId, effectKey);
                     stepClaimService.markSucceeded(runId, stepId, latch.getResponseDigest());
                     addUnique(completed, stepId);
@@ -299,6 +323,8 @@ public class WorkflowOrchestrator {
             String outputSummary = summarizeAndMaskOutput(output);
             stepClaimService.updateOutputSnapshot(runId, stepId, outputSummary);
             stepClaimService.markSucceeded(runId, stepId, outputSummary);
+            stepClaimService.recordToolSuccess(runtimeStep.getCapabilityName(), step.getCapabilityName(),
+                    Math.max(0, System.currentTimeMillis() - startedAt));
             context.putAttribute("workflow.execution.attempt", stepClaimService.getAttempt(runId, stepId));
             context.putAttribute("workflow.execution.reason", "");
 
@@ -309,8 +335,17 @@ public class WorkflowOrchestrator {
             }
 
             addUnique(completed, stepId);
-            log.info("[workflow] step execution succeeded|runId={} |stepId={}", runId, stepId);
+            log.info("[workflow] 步骤执行成功|runId={} |stepId={}", runId, stepId);
         } catch (Exception e) {
+            String failureReasonCode = resolveFailureReasonCode(e);
+            ToolFailureCategory failureCategory = resolveToolFailureCategory(e, failureReasonCode);
+            stepClaimService.recordToolFailure(
+                    runtimeStep.getCapabilityName(),
+                    step.getCapabilityName(),
+                    failureCategory,
+                    Math.max(0, System.currentTimeMillis() - startedAt),
+                    failureReasonCode
+            );
             DecisionResult decision = decideFailure(step, context, e);
             context.putAttribute("workflow.lastDecision." + stepId, decision);
             String reasonCode = decision.getReasonCode();
@@ -334,7 +369,7 @@ public class WorkflowOrchestrator {
                 context.putAttribute("workflow.effect.status", EffectStatus.UNKNOWN.name());
             }
 
-            log.warn("[workflow] step execution failed|runId={} |stepId={} |action={} |reason={} |error={}",
+            log.warn("[workflow] 步骤执行失败|runId={} |stepId={} |action={} |reason={} |error={}",
                     runId, stepId, decision.getAction(), reasonCode, e.getMessage());
 
             if (decision.getAction() == ExecutionEnums.DecisionAction.RETRY) {
@@ -346,29 +381,32 @@ public class WorkflowOrchestrator {
                         truncateError(e.getMessage())
                 );
                 if (retryScheduled) {
-                    log.info("[workflow] retry scheduled for step|runId={} |stepId={}", runId, stepId);
+                    log.info("[workflow] 已安排步骤重试|runId={} |stepId={}", runId, stepId);
                     executeStep(step, context, completed, failed, failFast);
                     return;
                 }
             }
 
             if (decision.getAction() == ExecutionEnums.DecisionAction.FALLBACK_TOOL) {
-                String fallbackTool = stepClaimService.scheduleFallbackRetry(
+                StepClaimService.FallbackScheduleResult fallbackResult = stepClaimService.scheduleFallbackRetryDetailed(
                         runId,
                         stepId,
                         "fallback_tool",
                         "FALLBACK_TOOL",
                         truncateError(e.getMessage())
                 );
-                if (fallbackTool != null && !fallbackTool.isBlank()) {
+                if (fallbackResult.hasSelectedTool()) {
+                    String fallbackTool = fallbackResult.selectedTool();
                     context.putAttribute("workflow.fallback.required", true);
                     context.putAttribute("workflow.fallback.selected." + stepId, fallbackTool);
                     context.putAttribute("workflow.execution.reason", "fallback_tool");
-                    log.info("[workflow] fallback tool selected|runId={} |stepId={} |fromTool={} |toTool={}",
+                    log.info("[workflow] 已选择回退工具并继续执行|runId={} |stepId={} |fromTool={} |toTool={}",
                             runId, stepId, runtimeStep.getCapabilityName(), fallbackTool);
                     executeStep(step, context, completed, failed, failFast);
                     return;
                 }
+                handleFallbackUnavailable(step, context, e, failed, fallbackResult.failureReasonCode());
+                return;
             }
             handleFailureDecision(step, context, decision, e, failed);
             if (failFast) {
@@ -386,7 +424,7 @@ public class WorkflowOrchestrator {
                                      List<String> failed) {
         ExecutionStepRunEntity current = stepClaimService.findStepRun(runId, stepId);
         if (current == null || current.getStatus() == null) {
-            log.warn("[workflow] step status missing after execution, mark as failed|runId={} |stepId={}", runId, stepId);
+            log.warn("[workflow] 执行后未读取到 step 状态，按失败处理|runId={} |stepId={}", runId, stepId);
             addUnique(failed, stepId);
             context.putAttribute("workflow.error", "step_run_not_found");
             return;
@@ -395,13 +433,13 @@ public class WorkflowOrchestrator {
         String status = current.getStatus();
         if (StepStatus.SUCCEEDED.name().equals(status) || StepStatus.SKIPPED.name().equals(status)) {
             addUnique(completed, stepId);
-            log.info("[workflow] step terminal status observed|runId={} |stepId={} |status={}", runId, stepId, status);
+            log.info("[workflow] 观察到步骤终态|runId={} |stepId={} |status={}", runId, stepId, status);
             return;
         }
         if (StepStatus.FAILED.name().equals(status)) {
             addUnique(failed, stepId);
             context.putAttribute("workflow.error", truncateError(current.getErrorMessage()));
-            log.warn("[workflow] step terminal status is FAILED|runId={} |stepId={} |reason={}",
+            log.warn("[workflow] 步骤终态为 FAILED|runId={} |stepId={} |reason={}",
                     runId, stepId, current.getReasonCode());
             return;
         }
@@ -411,13 +449,13 @@ public class WorkflowOrchestrator {
                     current.getReasonCode() == null ? "need_user_input" : current.getReasonCode());
             context.putAttribute("workflow.waiting.stepId", stepId);
             addUnique(failed, stepId);
-            log.info("[workflow] step terminal status is WAITING|runId={} |stepId={} |reason={}",
+            log.info("[workflow] 步骤终态为 WAITING|runId={} |stepId={} |reason={}",
                     runId, stepId, current.getReasonCode());
             return;
         }
 
         // RUNNING/PENDING states are transient and should be rare on this path.
-        log.info("[workflow] step terminal status is transient|runId={} |stepId={} |status={}",
+        log.info("[workflow] 步骤状态仍为瞬时态（RUNNING/PENDING）|runId={} |stepId={} |status={}",
                 runId, stepId, status);
     }
     private void handleFailureDecision(WorkflowStep step,
@@ -442,13 +480,8 @@ public class WorkflowOrchestrator {
                 stepClaimService.markFailed(runId, stepId, reasonCode, "REPLAN_REQUIRED", truncateError(e.getMessage()));
             }
             case FALLBACK_TOOL -> {
-                List<String> fallbackTools = resolveEffectiveFallbackTools(step);
-                context.putAttribute("workflow.fallback.required", true);
-                context.putAttribute("workflow.fallback.tools." + stepId, fallbackTools);
-                if (!fallbackTools.isEmpty()) {
-                    context.putAttribute("workflow.fallback.selected." + stepId, fallbackTools.get(0));
-                }
-                stepClaimService.markFailed(runId, stepId, "fallback_unavailable", "FALLBACK_UNAVAILABLE", truncateError(e.getMessage()));
+                handleFallbackUnavailable(step, context, e, failed, null);
+                return;
             }
             case DEGRADE_OUTPUT -> {
                 context.putAttribute("workflow.degrade.required", true);
@@ -475,16 +508,83 @@ public class WorkflowOrchestrator {
         context.putAttribute("workflow.error", truncateError(e.getMessage()));
     }
 
-    private WorkflowStep resolveRuntimeStep(WorkflowStep sourceStep, String runId, String stepId) {
-        WorkflowStep runtime = copyStep(sourceStep);
-        if (runtime == null || runId == null || stepId == null) {
-            return runtime;
+    private void applySelectionToContext(WorkflowContext context, String stepId, ToolSelectionResult selection) {
+        if (context == null || stepId == null || selection == null) {
+            return;
         }
-        String activeCapability = stepClaimService.getEffectiveCapability(runId, stepId);
-        if (activeCapability != null && !activeCapability.isBlank()) {
-            runtime.setCapabilityName(activeCapability);
+        // 选择结果回填到上下文，便于链路日志、诊断与回放比对。
+        context.putAttribute("workflow.tool.selected." + stepId, selection.getSelectedTool());
+        context.putAttribute("workflow.tool.selection.reason." + stepId, selection.getReasonCode());
+        if (selection.getCircuitStateByTool() != null) {
+            context.putAttribute("workflow.tool.circuit.state." + stepId, selection.getCircuitStateByTool());
+            for (Map.Entry<String, String> entry : selection.getCircuitStateByTool().entrySet()) {
+                context.putAttribute("workflow.tool.circuit.state." + entry.getKey(), entry.getValue());
+            }
         }
-        return runtime;
+        if (selection.getHealthSnapshotByTool() != null) {
+            context.putAttribute("workflow.tool.health.snapshot." + stepId, selection.getHealthSnapshotByTool());
+            for (Map.Entry<String, ?> entry : selection.getHealthSnapshotByTool().entrySet()) {
+                context.putAttribute("workflow.tool.health.snapshot." + entry.getKey(), entry.getValue());
+            }
+        }
+    }
+
+    private void handleFallbackUnavailable(WorkflowStep step,
+                                           WorkflowContext context,
+                                           Exception e,
+                                           List<String> failed,
+                                           String unavailableReasonCode) {
+        String runId = context.getRunId();
+        String stepId = step.getStepId();
+        DecisionResult decision = decideFallbackUnavailable(step);
+        context.putAttribute("workflow.lastDecision." + stepId, decision);
+        String message = truncateError(e == null ? null : e.getMessage());
+        String fallbackReasonCode = normalizeFallbackUnavailableReason(unavailableReasonCode);
+        log.warn("[workflow] fallback 不可调度，进入决策分流|runId={} |stepId={} |reasonCode={} |action={}",
+                runId, stepId, fallbackReasonCode, decision == null ? null : decision.getAction());
+        if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.WAIT) {
+            context.putAttribute("workflow.waiting", true);
+            context.putAttribute("workflow.waiting.reason", fallbackReasonCode);
+            context.putAttribute("workflow.waiting.stepId", stepId);
+            stepClaimService.markWaiting(runId, stepId, fallbackReasonCode, "FALLBACK_UNAVAILABLE", message);
+            executionRunService.markWaiting(runId, stepId, fallbackReasonCode, message);
+            addUnique(failed, stepId);
+            log.info("[workflow] fallback 不可用后转 WAITING|runId={} |stepId={} |reasonCode={}",
+                    runId, stepId, fallbackReasonCode);
+            return;
+        }
+        if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.REPLAN) {
+            context.putAttribute("workflow.replan.required", true);
+            stepClaimService.markFailed(runId, stepId, fallbackReasonCode, "REPLAN_REQUIRED", message);
+            executionRunService.markFailed(runId, "REPLAN_REQUIRED", message);
+            addUnique(failed, stepId);
+            context.putAttribute("workflow.error", message);
+            log.info("[workflow] fallback 不可用后转 REPLAN|runId={} |stepId={} |reasonCode={}",
+                    runId, stepId, fallbackReasonCode);
+            return;
+        }
+        stepClaimService.markFailed(runId, stepId, fallbackReasonCode, "FALLBACK_UNAVAILABLE", message);
+        executionRunService.markAborted(runId, "FALLBACK_UNAVAILABLE", message);
+        addUnique(failed, stepId);
+        context.putAttribute("workflow.error", message);
+        log.warn("[workflow] fallback 不可用后执行 ABORT|runId={} |stepId={} |reasonCode={}",
+                runId, stepId, fallbackReasonCode);
+    }
+
+    private DecisionResult decideFallbackUnavailable(WorkflowStep step) {
+        FailureContext failureContext = FailureContext.builder()
+                .errorCategory(ExecutionEnums.ErrorCategory.RETRYABLE_TOOL_ERROR)
+                .failureReasonCode("fallback_unavailable")
+                .retryCount(resolveMaxRetries(step))
+                .maxRetries(resolveMaxRetries(step))
+                .hasFallbackTool(false)
+                .replanAllowed(resolveReplanAllowed(step))
+                .needsExternalSignal(resolveNeedsExternalSignal(step, "fallback_unavailable"))
+                .sideEffect(resolveSideEffect(step))
+                .effectState(resolveEffectState(step))
+                .preferredResumeMode(resolvePreferredResumeMode(step))
+                .build();
+        return decisionTable.resolve(failureContext);
     }
 
     private WorkflowStep copyStep(WorkflowStep sourceStep) {
@@ -854,6 +954,43 @@ public class WorkflowOrchestrator {
         return global == null ? 2 : Math.max(0, global);
     }
 
+    private ToolFailureCategory resolveToolFailureCategory(Exception e, String reasonCode) {
+        if ("done_check_fail".equals(reasonCode)) {
+            return ToolFailureCategory.QUALITY_FAIL;
+        }
+        if ("output_schema_version_mismatch".equals(reasonCode)
+                || "output_missing_required_field_stable".equals(reasonCode)
+                || "output_type_mismatch_stable".equals(reasonCode)
+                || "schema_version_unsupported_compat_restricted".equals(reasonCode)
+                || "output_parse_error".equals(reasonCode)
+                || "output_malformed_temporary".equals(reasonCode)) {
+            return ToolFailureCategory.SCHEMA_FAIL;
+        }
+        if (e instanceof ToolValidationException validationException) {
+            ExecutionEnums.ErrorCategory category = validationException.getErrorCategory();
+            if (category == ExecutionEnums.ErrorCategory.QUALITY_FAIL) {
+                return ToolFailureCategory.QUALITY_FAIL;
+            }
+            if (category == ExecutionEnums.ErrorCategory.NEED_USER_INPUT) {
+                return ToolFailureCategory.OTHER;
+            }
+        }
+        String message = e == null || e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        if (message.contains("timeout") || message.contains("timed out")) {
+            return ToolFailureCategory.TIMEOUT;
+        }
+        if (message.contains("connection")
+                || message.contains("network")
+                || message.contains("socket")
+                || message.contains("refused")
+                || message.contains("503")
+                || message.contains("502")
+                || message.contains("504")) {
+            return ToolFailureCategory.INFRA_FAIL;
+        }
+        return ToolFailureCategory.OTHER;
+    }
+
     private ExecutionEnums.ErrorCategory resolveErrorCategory(Exception e, String reasonCode) {
         if (e instanceof ToolValidationException validationException && validationException.getErrorCategory() != null) {
             return validationException.getErrorCategory();
@@ -978,7 +1115,7 @@ public class WorkflowOrchestrator {
 
     private boolean resolveReplanAllowed(WorkflowStep step) {
         if (step == null || step.getFailurePolicy() == null) {
-            return true;
+            return false;
         }
         return step.getFailurePolicy().isReplanAllowed();
     }
@@ -1057,6 +1194,16 @@ public class WorkflowOrchestrator {
             return errorMessage;
         }
         return errorMessage.substring(0, 500);
+    }
+
+    private String normalizeFallbackUnavailableReason(String reasonCode) {
+        if (reasonCode == null || reasonCode.isBlank()) {
+            return "fallback_unavailable";
+        }
+        if ("fallback_cas_exhausted".equals(reasonCode)) {
+            return reasonCode;
+        }
+        return "fallback_unavailable";
     }
 }
 

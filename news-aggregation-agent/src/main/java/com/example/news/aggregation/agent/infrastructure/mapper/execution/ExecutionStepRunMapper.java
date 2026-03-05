@@ -40,14 +40,18 @@ public interface ExecutionStepRunMapper extends BaseMapper<ExecutionStepRunEntit
                 run_id, step_id, capability_name, active_capability_name, status,
                 attempt, max_retries, recovery_attempt, max_recovery_attempts,
                 worker_id, lease_until, depends_on_json, input_json, output_json,
-                side_effect, fallback_tools_json, replan_allowed, need_user_input_on_failure,
+                side_effect, fallback_tools_json, selected_tool, selection_reason_code,
+                circuit_state_snapshot, fallback_candidates_json,
+                replan_allowed, need_user_input_on_failure,
                 resume_mode, reason_code, error_code, error_message,
                 started_at, finished_at, deleted, lock_version, gmt_create, gmt_modified
             ) VALUES (
                 #{runId}, #{stepId}, #{capabilityName}, #{activeCapabilityName}, #{status},
                 #{attempt}, #{maxRetries}, #{recoveryAttempt}, #{maxRecoveryAttempts},
                 #{workerId}, #{leaseUntil}, #{dependsOnJson}, #{inputJson}, #{outputJson},
-                #{sideEffect}, #{fallbackToolsJson}, #{replanAllowed}, #{needUserInputOnFailure},
+                #{sideEffect}, #{fallbackToolsJson}, #{selectedTool}, #{selectionReasonCode},
+                #{circuitStateSnapshot}, #{fallbackCandidatesJson},
+                #{replanAllowed}, #{needUserInputOnFailure},
                 #{resumeMode}, #{reasonCode}, #{errorCode}, #{errorMessage},
                 #{startedAt}, #{finishedAt}, #{deleted}, #{lockVersion}, NOW(), NOW()
             )
@@ -114,6 +118,25 @@ public interface ExecutionStepRunMapper extends BaseMapper<ExecutionStepRunEntit
                             @Param("stepId") String stepId,
                             @Param("expectedLockVersion") Integer expectedLockVersion,
                             @Param("outputJson") String outputJson);
+
+    @Update(StepClaimSql.UPDATE_SELECTION_SNAPSHOT)
+    int updateSelectionSnapshotWithCas(@Param("runId") String runId,
+                                       @Param("stepId") String stepId,
+                                       @Param("expectedLockVersion") Integer expectedLockVersion,
+                                       @Param("selectedTool") String selectedTool,
+                                       @Param("selectionReasonCode") String selectionReasonCode,
+                                       @Param("circuitStateSnapshot") String circuitStateSnapshot,
+                                       @Param("fallbackCandidatesJson") String fallbackCandidatesJson);
+
+    @Update(StepClaimSql.UPDATE_ACTIVE_SELECTION_SNAPSHOT)
+    int updateActiveSelectionSnapshotWithCas(@Param("runId") String runId,
+                                             @Param("stepId") String stepId,
+                                             @Param("expectedLockVersion") Integer expectedLockVersion,
+                                             @Param("activeCapabilityName") String activeCapabilityName,
+                                             @Param("selectedTool") String selectedTool,
+                                             @Param("selectionReasonCode") String selectionReasonCode,
+                                             @Param("circuitStateSnapshot") String circuitStateSnapshot,
+                                             @Param("fallbackCandidatesJson") String fallbackCandidatesJson);
 
     @Select("""
             SELECT *

@@ -4,6 +4,10 @@ import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceP
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
+import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
+import com.example.news.aggregation.llm.springai.decision.DecisionResult;
+import com.example.news.aggregation.llm.springai.decision.DecisionTable;
+import com.example.news.aggregation.llm.springai.decision.FailureContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -13,7 +17,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Recovery worker that scans expired RUNNING steps and drives safe resume actions.
+ * 恢复 worker：扫描过期 RUNNING 步骤并执行安全恢复动作。
  */
 @Slf4j
 @Service
@@ -26,6 +30,7 @@ public class ExecutionRecoveryService {
     private final EffectQueryGateway effectQueryGateway;
     private final ExecutionRunService executionRunService;
     private final ExecutionDispatchService executionDispatchService;
+    private final DecisionTable decisionTable;
 
     @Scheduled(fixedDelayString = "${app.agent.execution.recovery.scan-interval-ms:15000}")
     public void recoverExpiredSteps() {
@@ -38,14 +43,14 @@ public class ExecutionRecoveryService {
         if (expired == null || expired.isEmpty()) {
             return;
         }
-        log.info("[execution-recovery] found expired RUNNING steps|count={}", expired.size());
+        log.info("[execution-recovery] 扫描到过期 RUNNING 步骤|count={}", expired.size());
         for (ExecutionStepRunEntity step : expired) {
             if (tryHandleUnknownEffect(step)) {
                 continue;
             }
 
             RecoveryAction action = decideRecoveryAction(step);
-            log.info("[execution-recovery] recovery action decided|runId={} |stepId={} |action={} |reasonCode={} |errorCode={}",
+            log.info("[execution-recovery] 恢复动作已决策|runId={} |stepId={} |action={} |reasonCode={} |errorCode={}",
                     step.getRunId(), step.getStepId(), action, step.getReasonCode(), step.getErrorCode());
 
             if (action == RecoveryAction.WAIT) {
@@ -98,29 +103,18 @@ public class ExecutionRecoveryService {
             }
 
             if (action == RecoveryAction.FALLBACK) {
-                String selectedFallbackTool = stepClaimService.scheduleFallbackRetry(
+                StepClaimService.FallbackScheduleResult fallbackResult = stepClaimService.scheduleFallbackRetryDetailed(
                         step.getRunId(),
                         step.getStepId(),
                         "fallback_tool",
                         "FALLBACK_TOOL",
                         "fallback requested by recovery"
                 );
-                if (selectedFallbackTool == null || selectedFallbackTool.isBlank()) {
-                    stepClaimService.markFailed(
-                            step.getRunId(),
-                            step.getStepId(),
-                            "fallback_unavailable",
-                            "FALLBACK_UNAVAILABLE",
-                            "fallback cannot be scheduled"
-                    );
-                    executionRunService.markFailed(
-                            step.getRunId(),
-                            "FALLBACK_UNAVAILABLE",
-                            "fallback cannot be scheduled"
-                    );
+                if (!fallbackResult.hasSelectedTool()) {
+                    handleFallbackUnavailable(step, fallbackResult.failureReasonCode());
                 } else {
-                    log.info("[execution-recovery] fallback retry scheduled|runId={} |stepId={} |selectedTool={}",
-                            step.getRunId(), step.getStepId(), selectedFallbackTool);
+                    log.info("[execution-recovery] 已安排回退重试|runId={} |stepId={} |selectedTool={}",
+                            step.getRunId(), step.getStepId(), fallbackResult.selectedTool());
                 }
                 continue;
             }
@@ -152,13 +146,13 @@ public class ExecutionRecoveryService {
                             "recovery_dispatch_failed",
                             "recovered step dispatch failed"
                     );
-                    log.error("[execution-recovery] recovery dispatch failed, rollback to WAITING|runId={} |stepId={}",
+                    log.error("[execution-recovery] 恢复后重新派发失败，已回滚到 WAITING|runId={} |stepId={}",
                             step.getRunId(), step.getStepId());
                 }
                 continue;
             }
             if (!recovered) {
-                log.warn("[execution-recovery] recover failed|runId={} |stepId={} |status={} |recoveryAttempt={}",
+                log.warn("[execution-recovery] 步骤恢复失败|runId={} |stepId={} |status={} |recoveryAttempt={}",
                         step.getRunId(),
                         step.getStepId(),
                         step.getStatus(),
@@ -233,6 +227,92 @@ public class ExecutionRecoveryService {
         return RecoveryAction.RETRY;
     }
 
+    private void handleFallbackUnavailable(ExecutionStepRunEntity step, String unavailableReasonCode) {
+        if (step == null) {
+            return;
+        }
+        DecisionResult decision = decideFallbackUnavailable(step);
+        String fallbackReasonCode = normalizeFallbackUnavailableReason(unavailableReasonCode);
+        log.warn("[execution-recovery] 恢复阶段 fallback 不可调度|runId={} |stepId={} |reasonCode={} |action={}",
+                step.getRunId(), step.getStepId(), fallbackReasonCode, decision == null ? null : decision.getAction());
+        if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.WAIT) {
+            stepClaimService.markWaiting(
+                    step.getRunId(),
+                    step.getStepId(),
+                    fallbackReasonCode,
+                    "FALLBACK_UNAVAILABLE",
+                    "fallback cannot be scheduled, need user input"
+            );
+            executionRunService.markWaiting(
+                    step.getRunId(),
+                    step.getStepId(),
+                    fallbackReasonCode,
+                    "fallback cannot be scheduled"
+            );
+            log.info("[execution-recovery] fallback 不可用后转 WAITING|runId={} |stepId={} |reasonCode={}",
+                    step.getRunId(), step.getStepId(), fallbackReasonCode);
+            return;
+        }
+        if (decision != null && decision.getAction() == ExecutionEnums.DecisionAction.REPLAN) {
+            stepClaimService.markFailed(
+                    step.getRunId(),
+                    step.getStepId(),
+                    fallbackReasonCode,
+                    "REPLAN_REQUIRED",
+                    "fallback cannot be scheduled, replan required"
+            );
+            executionRunService.markFailed(
+                    step.getRunId(),
+                    "REPLAN_REQUIRED",
+                    "fallback cannot be scheduled"
+            );
+            log.info("[execution-recovery] fallback 不可用后转 REPLAN|runId={} |stepId={} |reasonCode={}",
+                    step.getRunId(), step.getStepId(), fallbackReasonCode);
+            return;
+        }
+        stepClaimService.markFailed(
+                step.getRunId(),
+                step.getStepId(),
+                fallbackReasonCode,
+                "FALLBACK_UNAVAILABLE",
+                "fallback cannot be scheduled"
+        );
+        executionRunService.markAborted(
+                step.getRunId(),
+                "FALLBACK_UNAVAILABLE",
+                "fallback cannot be scheduled"
+        );
+        log.warn("[execution-recovery] fallback 不可用后执行 ABORT|runId={} |stepId={} |reasonCode={}",
+                step.getRunId(), step.getStepId(), fallbackReasonCode);
+    }
+
+    private DecisionResult decideFallbackUnavailable(ExecutionStepRunEntity step) {
+        int maxRetries = step.getMaxRetries() == null ? 0 : Math.max(0, step.getMaxRetries());
+        FailureContext context = FailureContext.builder()
+                .errorCategory(ExecutionEnums.ErrorCategory.RETRYABLE_TOOL_ERROR)
+                .failureReasonCode("fallback_unavailable")
+                .retryCount(maxRetries)
+                .maxRetries(maxRetries)
+                .hasFallbackTool(false)
+                .replanAllowed(Boolean.TRUE.equals(step.getReplanAllowed()))
+                .needsExternalSignal(Boolean.TRUE.equals(step.getNeedUserInputOnFailure()))
+                .sideEffect(parseSideEffect(step.getSideEffect()))
+                .effectState(parseEffectState(step.getSideEffect()))
+                .preferredResumeMode(parseResumeMode(step.getResumeMode()))
+                .build();
+        return decisionTable.resolve(context);
+    }
+
+    private String normalizeFallbackUnavailableReason(String reasonCode) {
+        if (reasonCode == null || reasonCode.isBlank()) {
+            return "fallback_unavailable";
+        }
+        if ("fallback_cas_exhausted".equals(reasonCode)) {
+            return reasonCode;
+        }
+        return "fallback_unavailable";
+    }
+
     private boolean hasFallbackTrigger(ExecutionStepRunEntity step) {
         String reason = lower(step == null ? null : step.getReasonCode());
         String error = lower(step == null ? null : step.getErrorCode());
@@ -271,7 +351,37 @@ public class ExecutionRecoveryService {
     }
 
     private boolean isReplanAllowed(ExecutionStepRunEntity step) {
-        return step == null || step.getReplanAllowed() == null || step.getReplanAllowed();
+        return step != null && Boolean.TRUE.equals(step.getReplanAllowed());
+    }
+
+    private ExecutionEnums.SideEffectType parseSideEffect(String sideEffect) {
+        if (sideEffect == null || sideEffect.isBlank()) {
+            return ExecutionEnums.SideEffectType.NONE;
+        }
+        try {
+            return ExecutionEnums.SideEffectType.valueOf(sideEffect);
+        } catch (Exception ignore) {
+            return ExecutionEnums.SideEffectType.NONE;
+        }
+    }
+
+    private ExecutionEnums.EffectState parseEffectState(String sideEffect) {
+        ExecutionEnums.SideEffectType type = parseSideEffect(sideEffect);
+        if (type == ExecutionEnums.SideEffectType.WRITE || type == ExecutionEnums.SideEffectType.EXTERNAL) {
+            return ExecutionEnums.EffectState.UNKNOWN;
+        }
+        return ExecutionEnums.EffectState.NOT_APPLIED;
+    }
+
+    private ExecutionEnums.ResumeMode parseResumeMode(String resumeMode) {
+        if (resumeMode == null || resumeMode.isBlank()) {
+            return ExecutionEnums.ResumeMode.CONTINUE;
+        }
+        try {
+            return ExecutionEnums.ResumeMode.valueOf(resumeMode);
+        } catch (Exception ignore) {
+            return ExecutionEnums.ResumeMode.CONTINUE;
+        }
     }
 
     private boolean containsAny(String reason, String error, String... keywords) {
@@ -310,7 +420,7 @@ public class ExecutionRecoveryService {
                 effectKey,
                 latch.getProviderTrace()
         );
-        log.info("[execution-recovery] found UNKNOWN effect, querying provider|runId={} |stepId={} |effectKey={} |queryResult={}",
+        log.info("[execution-recovery] 检测到 UNKNOWN 副作用，正在查询 provider|runId={} |stepId={} |effectKey={} |queryResult={}",
                 step.getRunId(), step.getStepId(), effectKey, queryResult);
 
         switch (queryResult) {
@@ -323,7 +433,7 @@ public class ExecutionRecoveryService {
                         "{\"recoveredBy\":\"effect_query\",\"effectStatus\":\"APPLIED\"}"
                 );
                 if (!succeeded) {
-                    log.warn("[execution-recovery] UNKNOWN effect confirmed APPLIED but step mark succeeded failed|runId={} |stepId={}",
+                    log.warn("[execution-recovery] UNKNOWN 副作用确认 APPLIED，但 step 标记成功失败|runId={} |stepId={}",
                             step.getRunId(), step.getStepId());
                 }
                 return true;

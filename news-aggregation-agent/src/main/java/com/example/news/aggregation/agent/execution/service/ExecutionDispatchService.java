@@ -139,6 +139,9 @@ public class ExecutionDispatchService {
     }
 
     private String resolveCapability(ExecutionStepRunEntity stepRun) {
+        if (stepRun.getSelectedTool() != null && !stepRun.getSelectedTool().isBlank()) {
+            return stepRun.getSelectedTool();
+        }
         if (stepRun.getActiveCapabilityName() != null && !stepRun.getActiveCapabilityName().isBlank()) {
             return stepRun.getActiveCapabilityName();
         }

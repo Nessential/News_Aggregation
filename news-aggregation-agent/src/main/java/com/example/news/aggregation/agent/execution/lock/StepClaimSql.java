@@ -48,9 +48,27 @@ public final class StepClaimSql {
     public static final String MARK_RETRY_PENDING_SWITCH_CAPABILITY =
             "UPDATE agent_execution_step_run " +
                     "SET status='PENDING', attempt=attempt+1, active_capability_name=#{activeCapabilityName}, " +
+                    "selected_tool=#{activeCapabilityName}, selection_reason_code=#{reasonCode}, " +
                     "reason_code=#{reasonCode}, error_code=#{errorCode}, error_message=#{errorMessage}, " +
                     "worker_id=NULL, lease_until=NULL, lock_version=lock_version+1 " +
                     "WHERE run_id=#{runId} AND step_id=#{stepId} AND status='RUNNING' " +
+                    "AND lock_version=#{expectedLockVersion} AND deleted=0";
+
+    public static final String UPDATE_SELECTION_SNAPSHOT =
+            "UPDATE agent_execution_step_run " +
+                    "SET selected_tool=#{selectedTool}, selection_reason_code=#{selectionReasonCode}, " +
+                    "circuit_state_snapshot=#{circuitStateSnapshot}, fallback_candidates_json=#{fallbackCandidatesJson}, " +
+                    "lock_version=lock_version+1 " +
+                    "WHERE run_id=#{runId} AND step_id=#{stepId} " +
+                    "AND lock_version=#{expectedLockVersion} AND deleted=0";
+
+    public static final String UPDATE_ACTIVE_SELECTION_SNAPSHOT =
+            "UPDATE agent_execution_step_run " +
+                    "SET active_capability_name=#{activeCapabilityName}, " +
+                    "selected_tool=#{selectedTool}, selection_reason_code=#{selectionReasonCode}, " +
+                    "circuit_state_snapshot=#{circuitStateSnapshot}, fallback_candidates_json=#{fallbackCandidatesJson}, " +
+                    "lock_version=lock_version+1 " +
+                    "WHERE run_id=#{runId} AND step_id=#{stepId} " +
                     "AND lock_version=#{expectedLockVersion} AND deleted=0";
 
     public static final String UPDATE_OUTPUT =
