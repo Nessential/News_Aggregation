@@ -41,6 +41,12 @@
             <artifactId>news-aggregation-base</artifactId>
         </dependency>
 
+        <!-- Datasource Module (for MyBatis + MySQL execution persistence) -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-datasource</artifactId>
+        </dependency>
+
         <!-- Cache Module (for Redis) -->
         <dependency>
             <groupId>com.example</groupId>

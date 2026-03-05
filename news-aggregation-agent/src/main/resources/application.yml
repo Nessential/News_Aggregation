@@ -1,9 +1,19 @@
-server:
+﻿server:
   port: 8084
 
-
-
-  # Redis配置 (用于Session管理)
+spring:
+  application:
+    name: news-aggregation-agent
+  config:
+    import:
+      - classpath:base.yml
+      - classpath:datasource.yml
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:mock-key}
+      chat:
+        model: qwen3.5-flash
+        temperature: 0.7
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -18,22 +28,7 @@ server:
           min-idle: 0
           max-wait: -1ms
 
-# Spring AI配置
-spring:
-  application:
-    name: news-aggregation-agent
-  config:
-    import:
-      - classpath:base.yml  # 导入基础配置，包含智谱AI配置
-  ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY:mock-key}
-      # chat模型配置  
-      chat:
-        model: qwen3.5-flash
-        temperature: 0.7
-
-# 智谱 Embedding 配置 (使用 2048 维向量)
+# Embedding 配置
 embedding:
   zhipu:
     api-key: ${ZHIPU_API_KEY}
@@ -46,7 +41,7 @@ embedding:
     chunk-overlap: 50
     min-chunk-size: 100
 
-# XXL-Job 配置 (占位符，Agent 不使用)
+# XXL-Job 占位配置（agent 当前不启用 job）
 xxl:
   job:
     admin:
@@ -59,35 +54,49 @@ xxl:
       logpath: logs/xxl-job
       logretentiondays: 30
 
-# Agent应用配置
 app:
   news:
     retrieval:
       base-url: http://localhost:8080
     base-url: http://localhost:8080
 
-  # Mock模式开关（开发/测试时启用）
   llm:
-    mock-mode: false  # 设为false使用真实数据源
+    mock-mode: false
     base-url: http://localhost:8081
     router:
       base-url: http://localhost:8081
-  # Qdrant配置
+
   qdrant:
-    # 从 base.yml 中读取英文 Chunk 集合名
     collection-name: ${news.aggregation.qdrant.collections.chunks-en}
     host: ${news.aggregation.qdrant.host}
     port: ${news.aggregation.qdrant.port}
-  
-  # Elasticsearch配置
+
   elasticsearch:
-    # 从 base.yml 中读取索引名
     index-name: ${news.aggregation.elasticsearch.index-name}
-  
+
   agent:
     execution:
       schema-version: execution-plan/1.0
       semantic-version: 1.0.0
+      persistence:
+        enabled: true
+        worker-id: ${AGENT_EXECUTION_WORKER_ID:${HOSTNAME:local-worker}}
+        step-lease-seconds: 30
+        heartbeat-seconds: 10
+        takeover-enabled: true
+      dedupe:
+        include-plan-hash: true
+      recovery:
+        enabled: true
+        scan-interval-ms: 15000
+        scan-batch-size: 100
+        max-recovery-attempts: 5
+      effect-query:
+        enabled: false
+        connect-timeout-ms: 1500
+        read-timeout-ms: 2000
+        allowed-hosts: []
+
     schema-validation:
       enabled: true
       mode: STRICT
@@ -108,36 +117,27 @@ app:
           - retrieve_news
       global-fallback-tools: []
       quality-gate-enabled: true
-    # 会话管理
+
     session:
-      # Session/Turn/幂等记录在 Redis 中的默认过期时间（分钟）
       timeout-minutes: 30
       max-history-size: 50
       redis-key-prefix: "session:"
-      # 锁持有者标记（session:lock:owner:{sessionId}）的 TTL（秒）
-      # 仅用于返回 runningTurnId 和排障，不是分布式锁本体的过期时间
       lock-owner-ttl-seconds: 300
-      # Redisson 看门狗超时（毫秒）
-      # 使用 tryLock() 且不指定 leaseTime 时，锁会按该参数自动续租
       watchdog-timeout-ms: 90000
-    
-    # Pipeline配置
+
     pipeline:
       default-top-k: 10
       max-candidates: 50
       timeout-seconds: 30
-    
-    # 重试策略
+
     retry:
       max-attempts: 3
       backoff-ms: 1000
-    
-    # 降级策略
+
     fallback:
       enabled: true
-      default-message: "抱歉，当前无法处理您的请求，请稍后再试"
+      default-message: "系统当前繁忙，请稍后再试。"
 
-# 日志配置
 logging:
   level:
     com.example.news.aggregation.agent: DEBUG
