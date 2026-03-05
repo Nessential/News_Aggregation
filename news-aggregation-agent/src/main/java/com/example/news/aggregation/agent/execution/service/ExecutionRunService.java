@@ -1,7 +1,9 @@
 package com.example.news.aggregation.agent.execution.service;
 
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
+import com.example.news.aggregation.agent.execution.domain.ExecutionEventLogEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
+import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.RunStatus;
 import com.example.news.aggregation.agent.execution.model.ExecutionReplaySnapshot;
 import com.example.news.aggregation.agent.execution.repo.ExecutionEventLogRepository;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -25,6 +28,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ExecutionRunService {
+
+    private static final String DEFAULT_TENANT_ID = "default";
 
     private final ExecutionRunRepository runRepository;
     private final ExecutionStepRunRepository stepRunRepository;
@@ -40,10 +45,28 @@ public class ExecutionRunService {
                                                 String requestDedupeKey,
                                                 String planHash,
                                                 String planId) {
-        return createOrReplayRunWithFlag(sessionId, turnId, requestDedupeKey, planHash, planId).run();
+        return createOrReplayRun(null, sessionId, turnId, requestDedupeKey, planHash, planId);
+    }
+
+    public ExecutionRunEntity createOrReplayRun(String tenantId,
+                                                String sessionId,
+                                                String turnId,
+                                                String requestDedupeKey,
+                                                String planHash,
+                                                String planId) {
+        return createOrReplayRunWithFlag(tenantId, sessionId, turnId, requestDedupeKey, planHash, planId).run();
     }
 
     public RunAcquireResult createOrReplayRunWithFlag(String sessionId,
+                                                      String turnId,
+                                                      String requestDedupeKey,
+                                                      String planHash,
+                                                      String planId) {
+        return createOrReplayRunWithFlag(null, sessionId, turnId, requestDedupeKey, planHash, planId);
+    }
+
+    public RunAcquireResult createOrReplayRunWithFlag(String tenantId,
+                                                      String sessionId,
                                                       String turnId,
                                                       String requestDedupeKey,
                                                       String planHash,
@@ -58,6 +81,7 @@ public class ExecutionRunService {
 
         ExecutionRunEntity entity = new ExecutionRunEntity();
         entity.setRunId(UUID.randomUUID().toString().replace("-", ""));
+        entity.setTenantId(resolveTenantId(tenantId));
         entity.setSessionId(sessionId);
         entity.setTurnId(turnId);
         entity.setRequestDedupeKey(requestDedupeKey);
@@ -122,6 +146,16 @@ public class ExecutionRunService {
      * 构建 run 级回放快照，聚合 run、step_run、event_log 三类持久化数据。
      */
     public ExecutionReplaySnapshot buildReplaySnapshot(String runId) {
+        return buildReplaySnapshot(runId, null);
+    }
+
+    /**
+     * 构建 run 级回放快照，可指定“最近 N 条事件窗口”。
+     * 说明：
+     * 1. eventLimit 为空或 <=0 时，返回全量事件；
+     * 2. eventLimit >0 时，按 id 倒序截取最近 N 条后再按升序输出，保证时间线可读。
+     */
+    public ExecutionReplaySnapshot buildReplaySnapshot(String runId, Integer eventLimit) {
         if (runId == null || runId.isBlank()) {
             return null;
         }
@@ -129,15 +163,28 @@ public class ExecutionRunService {
         if (run == null) {
             return null;
         }
+        List<ExecutionEventLogEntity> events;
+        if (eventLimit != null && eventLimit > 0) {
+            events = eventLogRepository.listRecentByRunId(runId, eventLimit);
+        } else {
+            events = eventLogRepository.listByRunId(runId);
+        }
+        List<ExecutionStepRunEntity> stepRuns = stepRunRepository.findByRunId(runId);
+        long eventCount = eventLogRepository.countByRunId(runId);
+        int stepCount = stepRuns == null ? 0 : stepRuns.size();
+        String timelineDigest = buildTimelineDigest(events, eventCount);
         ExecutionReplaySnapshot snapshot = ExecutionReplaySnapshot.builder()
                 .run(run)
-                .stepRuns(stepRunRepository.findByRunId(runId))
-                .events(eventLogRepository.listByRunId(runId))
+                .stepRuns(stepRuns)
+                .events(events)
+                .activePlanVersion(run.getActivePlanVersion())
+                .stepCount(stepCount)
+                .eventCount(eventCount)
+                .terminalState(run.getStatus())
+                .timelineDigest(timelineDigest)
                 .build();
-        int stepCount = snapshot.getStepRuns() == null ? 0 : snapshot.getStepRuns().size();
-        int eventCount = snapshot.getEvents() == null ? 0 : snapshot.getEvents().size();
-        log.info("[execution-run] 已生成运行回放快照|runId={} |stepCount={} |eventCount={}",
-                runId, stepCount, eventCount);
+        log.info("[execution-run] 已生成运行回放快照|runId={} |stepCount={} |eventCount={} |eventWindow={} |timelineDigest={}",
+                runId, stepCount, eventCount, eventLimit, timelineDigest);
         return snapshot;
     }
 
@@ -267,5 +314,37 @@ public class ExecutionRunService {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String resolveTenantId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            return DEFAULT_TENANT_ID;
+        }
+        return tenantId.trim();
+    }
+
+    private String buildTimelineDigest(List<ExecutionEventLogEntity> events,
+                                       long totalCount) {
+        if (events == null || events.isEmpty()) {
+            return "无事件";
+        }
+        java.util.List<String> nodes = events.stream()
+                .filter(Objects::nonNull)
+                .map(item -> {
+                    String eventType = item.getEventType() == null || item.getEventType().isBlank()
+                            ? "UNKNOWN_EVENT"
+                            : item.getEventType();
+                    String reasonCode = item.getReasonCode();
+                    return (reasonCode == null || reasonCode.isBlank())
+                            ? eventType
+                            : eventType + "(" + reasonCode + ")";
+                })
+                .limit(8)
+                .toList();
+        String digest = String.join(" -> ", nodes);
+        if (totalCount > nodes.size()) {
+            return "... -> " + digest;
+        }
+        return digest;
     }
 }

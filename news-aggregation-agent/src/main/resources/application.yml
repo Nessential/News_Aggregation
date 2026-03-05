@@ -76,6 +76,7 @@ app:
 
   agent:
     replan:
+      enabled: true
       max-replans-per-run: 2
       max-replans-per-step: 1
       min-source-count: 3
@@ -143,6 +144,7 @@ app:
 
     tool-selector:
       enabled: true
+      circuit-enabled: true
       health-window-size: 20
       health-min-samples: 5
       primary-infra-fail-rate-threshold: 0.6
@@ -151,6 +153,14 @@ app:
       half-open-owner-lease-seconds: 10
       cas-max-retries: 3
       capability-fallbacks: {}
+
+    replay:
+      api-enabled: true
+      default-event-limit: 100
+      max-event-limit: 500
+      raw-payload-enabled: false
+      payload-mask-max-length: 256
+      default-tenant-id: default
 
     session:
       timeout-minutes: 30

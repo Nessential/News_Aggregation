@@ -28,44 +28,18 @@ public class ToolSelectorV1 {
                                       String selectedTool,
                                       boolean forceReselect,
                                       boolean fallbackAction) {
-        List<String> disabledCandidates = selectionPolicy.buildCandidates(capability, primaryTool, fallbackTools);
+        List<String> configuredCandidates = selectionPolicy.buildCandidates(capability, primaryTool, fallbackTools);
         boolean selectedReusable = selectedTool != null
                 && !selectedTool.isBlank()
-                && disabledCandidates.contains(selectedTool)
+                && configuredCandidates.contains(selectedTool)
                 && !forceReselect
                 && !fallbackAction;
+
         if (!properties.isEnabled()) {
-            if (disabledCandidates.isEmpty()) {
-                log.warn("[tool-selector] 选择器关闭且无候选工具，返回 fallback_unavailable|capability={}", capability);
-                return ToolSelectionResult.builder()
-                        .selectedTool(null)
-                        .reasonCode("fallback_unavailable")
-                        .candidates(disabledCandidates)
-                        .circuitStateByTool(Map.of())
-                        .healthSnapshotByTool(Map.of())
-                        .build();
-            }
-            if (selectedReusable) {
-                log.info("[tool-selector] 选择器关闭，复用已选工具|capability={} |selectedTool={}", capability, selectedTool);
-                return ToolSelectionResult.builder()
-                        .selectedTool(selectedTool)
-                        .reasonCode("reuse_selected_tool")
-                        .candidates(disabledCandidates)
-                        .circuitStateByTool(Map.of())
-                        .healthSnapshotByTool(Map.of())
-                        .build();
-            }
-            log.info("[tool-selector] 选择器关闭，按固定顺序选择首个候选|capability={} |selectedTool={}",
-                    capability, disabledCandidates.getFirst());
-            return ToolSelectionResult.builder()
-                    .selectedTool(disabledCandidates.getFirst())
-                    .reasonCode("selector_disabled")
-                    .candidates(disabledCandidates)
-                    .circuitStateByTool(Map.of())
-                    .healthSnapshotByTool(Map.of())
-                    .build();
+            return selectWhenSelectorDisabled(capability, configuredCandidates, selectedTool, selectedReusable);
         }
-        List<String> candidates = disabledCandidates;
+
+        List<String> candidates = configuredCandidates;
         Map<String, String> circuitStateByTool = new LinkedHashMap<>();
         Map<String, ToolHealthSnapshot> healthSnapshotByTool = new LinkedHashMap<>();
         boolean primaryHealthDegraded = false;
@@ -73,6 +47,19 @@ public class ToolSelectorV1 {
         if (candidates.isEmpty()) {
             log.warn("[tool-selector] 候选工具为空，无法选择|capability={}", capability);
             return noSelection("fallback_unavailable", candidates, circuitStateByTool, healthSnapshotByTool);
+        }
+
+        if (!properties.isCircuitEnabled()) {
+            return selectWhenCircuitDisabled(
+                    capability,
+                    primaryTool,
+                    selectedTool,
+                    forceReselect,
+                    fallbackAction,
+                    candidates,
+                    healthSnapshotByTool,
+                    circuitStateByTool
+            );
         }
 
         if (selectedReusable) {
@@ -140,6 +127,9 @@ public class ToolSelectorV1 {
             return;
         }
         healthWindow.recordSuccess(selectedTool, capability, latencyMs);
+        if (!properties.isCircuitEnabled()) {
+            return;
+        }
         ToolCircuitTransitionOutcome outcome = circuitBreaker.onSuccess(selectedTool, capability, "tool_exec_success");
         if (outcome == ToolCircuitTransitionOutcome.CAS_EXHAUSTED) {
             log.warn("[tool-selector] 成功回收熔断状态时 CAS 重试耗尽|tool={} |capability={}", selectedTool, capability);
@@ -158,6 +148,9 @@ public class ToolSelectorV1 {
             failureCategory = ToolFailureCategory.OTHER;
         }
         healthWindow.recordFailure(selectedTool, capability, failureCategory, latencyMs);
+        if (!properties.isCircuitEnabled()) {
+            return;
+        }
         if (failureCategory == ToolFailureCategory.INFRA_FAIL || failureCategory == ToolFailureCategory.TIMEOUT) {
             ToolHealthSnapshot snapshot = healthWindow.snapshot(selectedTool, capability);
             boolean thresholdOpen = snapshot.getSampleCount() >= Math.max(1, properties.getHealthMinSamples())
@@ -189,6 +182,93 @@ public class ToolSelectorV1 {
                 }
             }
         }
+    }
+
+    private ToolSelectionResult selectWhenSelectorDisabled(String capability,
+                                                           List<String> candidates,
+                                                           String selectedTool,
+                                                           boolean selectedReusable) {
+        if (candidates.isEmpty()) {
+            log.warn("[tool-selector] 选择器关闭且无候选工具，返回 fallback_unavailable|capability={}", capability);
+            return ToolSelectionResult.builder()
+                    .selectedTool(null)
+                    .reasonCode("fallback_unavailable")
+                    .candidates(candidates)
+                    .circuitStateByTool(Map.of())
+                    .healthSnapshotByTool(Map.of())
+                    .build();
+        }
+        if (selectedReusable) {
+            log.info("[tool-selector] 选择器关闭，复用已选工具|capability={} |selectedTool={}", capability, selectedTool);
+            return ToolSelectionResult.builder()
+                    .selectedTool(selectedTool)
+                    .reasonCode("reuse_selected_tool")
+                    .candidates(candidates)
+                    .circuitStateByTool(Map.of())
+                    .healthSnapshotByTool(Map.of())
+                    .build();
+        }
+        log.info("[tool-selector] 选择器关闭，按固定顺序选择首个候选|capability={} |selectedTool={}",
+                capability, candidates.getFirst());
+        return ToolSelectionResult.builder()
+                .selectedTool(candidates.getFirst())
+                .reasonCode("selector_disabled")
+                .candidates(candidates)
+                .circuitStateByTool(Map.of())
+                .healthSnapshotByTool(Map.of())
+                .build();
+    }
+
+    private ToolSelectionResult selectWhenCircuitDisabled(String capability,
+                                                          String primaryTool,
+                                                          String selectedTool,
+                                                          boolean forceReselect,
+                                                          boolean fallbackAction,
+                                                          List<String> candidates,
+                                                          Map<String, ToolHealthSnapshot> healthSnapshotByTool,
+                                                          Map<String, String> circuitStateByTool) {
+        boolean selectedReusable = selectedTool != null
+                && !selectedTool.isBlank()
+                && candidates.contains(selectedTool)
+                && !forceReselect
+                && !fallbackAction;
+        if (selectedReusable) {
+            healthSnapshotByTool.put(selectedTool, healthWindow.snapshot(selectedTool, capability));
+            circuitStateByTool.put(selectedTool, "DISABLED");
+            return ToolSelectionResult.builder()
+                    .selectedTool(selectedTool)
+                    .reasonCode("reuse_selected_tool")
+                    .candidates(candidates)
+                    .circuitStateByTool(circuitStateByTool)
+                    .healthSnapshotByTool(healthSnapshotByTool)
+                    .build();
+        }
+
+        boolean primaryHealthDegraded = false;
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            ToolHealthSnapshot snapshot = healthWindow.snapshot(candidate, capability);
+            healthSnapshotByTool.put(candidate, snapshot);
+            circuitStateByTool.put(candidate, "DISABLED");
+            if (isPrimary(primaryTool, candidate)
+                    && !fallbackAction
+                    && !forceReselect
+                    && isPrimaryHealthDegraded(snapshot)) {
+                primaryHealthDegraded = true;
+                continue;
+            }
+            String reasonCode = buildReasonCode(primaryTool, candidate, fallbackAction, null, primaryHealthDegraded);
+            return ToolSelectionResult.builder()
+                    .selectedTool(candidate)
+                    .reasonCode(reasonCode)
+                    .candidates(candidates)
+                    .circuitStateByTool(circuitStateByTool)
+                    .healthSnapshotByTool(healthSnapshotByTool)
+                    .build();
+        }
+        return noSelection("fallback_unavailable", candidates, circuitStateByTool, healthSnapshotByTool);
     }
 
     private ToolSelectionResult noSelection(String reasonCode,
@@ -225,7 +305,7 @@ public class ToolSelectorV1 {
                                    ToolCircuitDecision decision,
                                    boolean primaryHealthDegraded) {
         if (isPrimary(primaryTool, candidate)) {
-            if (decision.getState() == ToolCircuitState.HALF_OPEN) {
+            if (decision != null && decision.getState() == ToolCircuitState.HALF_OPEN) {
                 return "primary_half_open_probe";
             }
             return "primary_healthy";
@@ -236,7 +316,7 @@ public class ToolSelectorV1 {
         if (primaryHealthDegraded) {
             return "fallback_primary_health_degraded";
         }
-        if (decision.getState() == ToolCircuitState.HALF_OPEN) {
+        if (decision != null && decision.getState() == ToolCircuitState.HALF_OPEN) {
             return "fallback_half_open_probe";
         }
         return "fallback_selected";

@@ -20,4 +20,16 @@ public class ExecutionEventLogRepository {
     public List<ExecutionEventLogEntity> listByRunId(String runId) {
         return eventLogMapper.listByRunId(runId);
     }
+
+    public long countByRunId(String runId) {
+        return eventLogMapper.countByRunId(runId);
+    }
+
+    public List<ExecutionEventLogEntity> listByRunIdAfterEventId(String runId, long afterId, int limit) {
+        return eventLogMapper.listByRunIdAfterEventId(runId, afterId, limit);
+    }
+
+    public List<ExecutionEventLogEntity> listRecentByRunId(String runId, int limit) {
+        return eventLogMapper.listRecentByRunId(runId, limit);
+    }
 }

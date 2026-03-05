@@ -49,6 +49,7 @@ public class ExecutionDispatchService {
         if (stepRuns == null || stepRuns.isEmpty()) {
             return false;
         }
+        int totalStepCount = stepRuns.size();
         Integer activePlanVersion = run.getActivePlanVersion();
         if (activePlanVersion != null && activePlanVersion > 0) {
             stepRuns = stepRuns.stream()
@@ -56,6 +57,9 @@ public class ExecutionDispatchService {
                             && step.getPlanVersion() != null
                             && step.getPlanVersion().equals(activePlanVersion))
                     .toList();
+            int filteredOut = Math.max(0, totalStepCount - stepRuns.size());
+            log.info("[execution-dispatch] 计划版本过滤结果|runId={} |activePlanVersion={} |matchedSteps={} |filteredOutSteps={}",
+                    runId, activePlanVersion, stepRuns.size(), filteredOut);
             if (stepRuns.isEmpty()) {
                 log.warn("[execution-dispatch] 当前激活计划版本无可调度步骤|runId={} |activePlanVersion={}",
                         runId, activePlanVersion);

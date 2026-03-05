@@ -17,6 +17,8 @@ import java.util.Map;
 public class ToolSelectorProperties {
 
     private boolean enabled = true;
+    /** 是否启用熔断状态机。关闭后仅禁用 circuit，不影响 selector 固定候选顺序与健康退化策略。 */
+    private boolean circuitEnabled = true;
     private int healthWindowSize = 20;
     private int healthMinSamples = 5;
     private double primaryInfraFailRateThreshold = 0.6;

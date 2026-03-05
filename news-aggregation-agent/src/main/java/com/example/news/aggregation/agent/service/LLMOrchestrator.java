@@ -188,6 +188,7 @@ public class LLMOrchestrator {
         workflowContext.putAttribute("turnId", turnId);
         workflowContext.putAttribute("requestHash", requestHash);
         workflowContext.putAttribute("retrievalMode", routerResult.getRetrievalMode());
+        workflowContext.putAttribute("tenantId", resolveTenantId(sessionState));
 
         Map<String, Object> filters = buildFilters(routerResult);
         if (filters != null && !filters.isEmpty()) {
@@ -300,6 +301,8 @@ public class LLMOrchestrator {
                                                                     String planId,
                                                                     String planHash) {
         String sessionId = workflowContext.getSessionId();
+        Object tenantObj = workflowContext.getAttributes().get("tenantId");
+        String tenantId = tenantObj == null ? "default" : String.valueOf(tenantObj);
         String requestDedupeKey = executionRunService.buildRequestDedupeKey(sessionId, turnId, requestHash);
         if (planHash == null || planHash.isBlank()) {
             throw new IllegalStateException("PLAN_HASH_REQUIRED: planId=" + planId);
@@ -307,6 +310,7 @@ public class LLMOrchestrator {
         String effectivePlanHash = planHash;
 
         ExecutionRunService.RunAcquireResult acquireResult = executionRunService.createOrReplayRunWithFlag(
+                tenantId,
                 sessionId,
                 turnId,
                 requestDedupeKey,
@@ -319,8 +323,16 @@ public class LLMOrchestrator {
         workflowContext.putAttribute("workflow.plan.hash", effectivePlanHash);
         workflowContext.putAttribute("workflow.run.replayed", acquireResult.replayed());
         workflowContext.putAttribute("workflow.run.status", run.getStatus());
+        workflowContext.putAttribute("workflow.run.tenantId", run.getTenantId());
         turnManager.bindRunId(sessionId, turnId, run.getRunId());
         return acquireResult;
+    }
+
+    private String resolveTenantId(SessionState sessionState) {
+        if (sessionState == null || sessionState.getUserId() == null || sessionState.getUserId().isBlank()) {
+            return "default";
+        }
+        return sessionState.getUserId().trim();
     }
 
     private void requireValidPlan(ExecutionPlan plan, TaskFamily taskFamily, String query) {

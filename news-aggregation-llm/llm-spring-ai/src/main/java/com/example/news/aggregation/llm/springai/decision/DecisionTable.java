@@ -146,6 +146,9 @@ public class DecisionTable {
         if (context == null) {
             return abort(null, "replan_invalid_context");
         }
+        if (Boolean.FALSE.equals(context.getReplanFeatureEnabled())) {
+            return abort(context, "replan_disabled");
+        }
         if (Boolean.TRUE.equals(context.getReplanNonRetryableReason())) {
             return abort(context, "replan_non_retryable_reason");
         }
