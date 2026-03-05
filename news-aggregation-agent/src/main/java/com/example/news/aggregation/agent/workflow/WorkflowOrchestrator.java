@@ -1,37 +1,47 @@
 package com.example.news.aggregation.agent.workflow;
 
+import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
+import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
+import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
+import com.example.news.aggregation.agent.execution.enums.EffectStatus;
+import com.example.news.aggregation.agent.execution.enums.StepStatus;
+import com.example.news.aggregation.agent.execution.service.EffectLatchService;
+import com.example.news.aggregation.agent.execution.service.ExecutionRunService;
+import com.example.news.aggregation.agent.execution.service.StepClaimService;
 import com.example.news.aggregation.agent.workflow.validation.SchemaValidationProperties;
 import com.example.news.aggregation.agent.workflow.validation.ToolInputValidator;
 import com.example.news.aggregation.agent.workflow.validation.ToolOutputValidator;
 import com.example.news.aggregation.agent.workflow.validation.ToolValidationException;
 import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
 import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
+import com.example.news.aggregation.llm.springai.contract.FailurePolicy;
+import com.example.news.aggregation.llm.springai.contract.RetryPolicy;
 import com.example.news.aggregation.llm.springai.decision.DecisionResult;
 import com.example.news.aggregation.llm.springai.decision.DecisionTable;
 import com.example.news.aggregation.llm.springai.decision.FailureContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 工作流编排器：负责执行显式 Workflow，或执行由 Planner 产出的 ExecutionPlan。
+ * Workflow executor based on static plan and runtime decision rules.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class WorkflowOrchestrator {
 
-    private static final String ATTR_RETRY_COUNTS = "workflow.retryCounts";
-
-    /**
-     * 任务类型与默认工具映射。
-     */
     private static final Map<String, List<String>> TYPE_TOOL_MAP = Map.of(
             "SEARCH", List.of("search_news"),
             "RETRIEVE", List.of("retrieve_news"),
@@ -49,20 +59,21 @@ public class WorkflowOrchestrator {
     private final ToolInputValidator toolInputValidator;
     private final ToolOutputValidator toolOutputValidator;
     private final SchemaValidationProperties schemaValidationProperties;
+    private final ExecutionPersistenceProperties executionPersistenceProperties;
 
-    /**
-     * 执行 Planner 产出的 ExecutionPlan。
-     */
+    private final ExecutionRunService executionRunService;
+    private final StepClaimService stepClaimService;
+    private final EffectLatchService effectLatchService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     public WorkflowContext executePlan(ExecutionPlan plan, WorkflowContext context) {
         if (plan == null || plan.getSteps() == null || plan.getSteps().isEmpty()) {
-            log.warn("[workflow] 计划为空，跳过执行");
+            log.warn("[workflow] empty plan, skip execution");
             return context;
         }
-        String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 开始执行计划: sessionId={}, planId={}, stepCount={}",
-                sessionId, plan.getPlanId(), plan.getSteps().size());
-
         if (context != null) {
+            context.putAttribute("workflow.plan.id", plan.getPlanId());
             if (plan.getSchemaVersion() != null && !plan.getSchemaVersion().isBlank()) {
                 context.putAttribute("workflow.schema.version", plan.getSchemaVersion());
             }
@@ -70,55 +81,57 @@ public class WorkflowOrchestrator {
                 context.putAttribute("workflow.semantic.version", plan.getSemanticVersion());
             }
         }
-
         WorkflowDefinition workflow = executionPlanWorkflowAdapter.toWorkflowDefinition(plan, TYPE_TOOL_MAP);
         return executeWorkflow(workflow, context);
     }
 
-    /**
-     * 执行工作流定义。
-     */
     public WorkflowContext executeWorkflow(WorkflowDefinition workflow, WorkflowContext context) {
         if (workflow == null || workflow.getSteps() == null || workflow.getSteps().isEmpty()) {
-            log.warn("[workflow] 工作流为空，跳过执行");
+            log.warn("[workflow] empty workflow, skip execution");
             return context;
         }
-        List<WorkflowStep> steps = workflow.getSteps();
-        boolean hasDependencies = steps.stream()
-                .anyMatch(step -> step != null && step.getDependsOn() != null && !step.getDependsOn().isEmpty());
-        String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 执行工作流: sessionId={}, stepCount={}, hasDependencies={}",
-                sessionId, steps.size(), hasDependencies);
+        if (context == null) {
+            context = WorkflowContext.builder().build();
+        }
+
+        ensureRunContext(workflow, context);
+        String runId = context.getRunId();
+        executionRunService.markRunning(runId, null);
+
+        List<WorkflowStep> normalizedSteps = normalizeSteps(workflow.getSteps());
+        materializeStepPolicies(normalizedSteps);
+        stepClaimService.prepareStepRuns(
+                runId,
+                normalizedSteps,
+                resolveGlobalDefaultMaxRetries(),
+                executionPersistenceProperties.getRecovery().getMaxRecoveryAttempts()
+        );
+
+        boolean hasDependencies = normalizedSteps.stream().anyMatch(step -> step.getDependsOn() != null && !step.getDependsOn().isEmpty());
+        List<String> completed = new CopyOnWriteArrayList<>();
+        List<String> failed = new CopyOnWriteArrayList<>();
+        boolean failFast = isFailFast(workflow);
 
         if (!hasDependencies) {
-            boolean failFast = isFailFast(workflow);
-            List<String> completed = new ArrayList<>();
-            List<String> failed = new ArrayList<>();
-            for (WorkflowStep step : steps) {
-                if (step == null) {
-                    continue;
-                }
+            for (WorkflowStep step : normalizedSteps) {
                 executeStep(step, context, completed, failed, failFast);
                 if (failFast && !failed.isEmpty()) {
                     break;
                 }
             }
-            finalizeWorkflow(context, completed, failed);
-            return context;
+        } else {
+            executeWithDependencies(normalizedSteps, workflow, context, completed, failed, failFast);
         }
-        return executeWithDependencies(workflow, context);
+
+        finalizeWorkflow(context, completed, failed);
+        return context;
     }
 
-    /**
-     * 根据 workflowId 执行内置工作流。
-     */
     public WorkflowContext executeWorkflow(String workflowId, WorkflowContext context) {
         if (workflowId == null || workflowId.isBlank()) {
-            log.warn("[workflow] workflowId 为空，跳过执行");
+            log.warn("[workflow] empty workflowId, skip execution");
             return context;
         }
-        String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 查找并执行工作流: sessionId={}, workflowId={}", sessionId, workflowId);
         WorkflowDefinition workflow = workflowRegistry.getWorkflow(workflowId);
         return executeWorkflow(workflow, context);
     }
@@ -127,90 +140,70 @@ public class WorkflowOrchestrator {
         return workflowRegistry.containsWorkflow(workflowId);
     }
 
-    private WorkflowContext executeWithDependencies(WorkflowDefinition workflow, WorkflowContext context) {
-        List<WorkflowStep> steps = workflow.getSteps();
+    /**
+     * Build plan hash from normalized workflow content.
+     */
+    public String computeWorkflowPlanHash(WorkflowDefinition workflow) {
+        return buildWorkflowPlanHash(workflow);
+    }
+
+    /**
+     * Build plan hash by workflowId lookup result.
+     */
+    public String computeWorkflowPlanHash(String workflowId) {
+        if (workflowId == null || workflowId.isBlank()) {
+            throw new IllegalArgumentException("workflowId must not be blank");
+        }
+        WorkflowDefinition workflow = workflowRegistry.getWorkflow(workflowId);
+        if (workflow == null) {
+            throw new IllegalStateException("WORKFLOW_NOT_FOUND:" + workflowId);
+        }
+        return buildWorkflowPlanHash(workflow);
+    }
+
+    private void executeWithDependencies(List<WorkflowStep> steps,
+                                         WorkflowDefinition workflow,
+                                         WorkflowContext context,
+                                         List<String> completed,
+                                         List<String> failed,
+                                         boolean failFast) {
         Map<String, WorkflowStep> stepMap = new HashMap<>();
-        for (int i = 0; i < steps.size(); i++) {
-            WorkflowStep step = steps.get(i);
-            if (step == null) {
-                continue;
-            }
-            if (step.getStepId() == null || step.getStepId().isBlank()) {
-                step.setStepId("step-" + i);
-            }
+        for (WorkflowStep step : steps) {
             stepMap.put(step.getStepId(), step);
         }
-
         boolean parallelizable = isParallelizable(workflow);
-        boolean failFast = isFailFast(workflow);
-        List<String> completed = new ArrayList<>();
-        List<String> failed = new ArrayList<>();
         int round = 0;
-
         while (completed.size() + failed.size() < stepMap.size()) {
             round++;
-            List<WorkflowStep> readySteps = findReadySteps(stepMap, completed, failed);
-            if (readySteps.isEmpty()) {
-                log.warn("[workflow] 无可执行步骤，可能存在依赖环: sessionId={}, completed={}, failed={}",
-                        context != null ? context.getSessionId() : "unknown", completed, failed);
+            List<WorkflowStep> ready = findReadySteps(stepMap, completed, failed);
+            if (ready.isEmpty()) {
+                log.warn("[workflow] no ready step found in this round, stop execution loop|runId={} |completed={} |failed={}",
+                        context.getRunId(), completed, failed);
                 break;
             }
-
-            log.info("[workflow] 依赖调度轮次: sessionId={}, round={}, readyStepCount={}, readySteps={}",
-                    context != null ? context.getSessionId() : "unknown",
-                    round,
-                    readySteps.size(),
-                    readySteps.stream().map(WorkflowStep::getStepId).toList());
-
+            log.info("[workflow] scheduling round started|runId={} |round={} |readySteps={}",
+                    context.getRunId(), round, ready.stream().map(WorkflowStep::getStepId).toList());
+            int before = completed.size() + failed.size();
             if (parallelizable) {
-                executeParallel(readySteps, context, completed, failed, failFast);
+                executeParallel(ready, context, completed, failed, failFast);
             } else {
-                executeSequential(readySteps, context, completed, failed, failFast);
+                executeSequential(ready, context, completed, failed, failFast);
             }
-
+            int after = completed.size() + failed.size();
+            if (after == before) {
+                log.warn("[workflow] no progress after round, break to avoid infinite loop|runId={} |round={} |readySteps={}",
+                        context.getRunId(),
+                        round,
+                        ready.stream().map(WorkflowStep::getStepId).toList());
+                for (WorkflowStep step : ready) {
+                    addUnique(failed, step.getStepId());
+                }
+                break;
+            }
             if (failFast && !failed.isEmpty()) {
                 break;
             }
         }
-
-        finalizeWorkflow(context, completed, failed);
-        return context;
-    }
-
-    private void finalizeWorkflow(WorkflowContext context, List<String> completed, List<String> failed) {
-        if (context == null) {
-            return;
-        }
-        context.putAttribute("workflow.completedSteps", completed);
-        context.putAttribute("workflow.failedSteps", failed);
-        context.putAttribute("workflow.status", failed.isEmpty() ? "SUCCESS" : "FAILED");
-        log.info("[workflow] 执行结束: sessionId={}, completed={}, failed={}, status={}",
-                context.getSessionId(), completed, failed, failed.isEmpty() ? "SUCCESS" : "FAILED");
-    }
-
-    private List<WorkflowStep> findReadySteps(Map<String, WorkflowStep> stepMap,
-                                              List<String> completed,
-                                              List<String> failed) {
-        List<WorkflowStep> ready = new ArrayList<>();
-        for (WorkflowStep step : stepMap.values()) {
-            if (step == null) {
-                continue;
-            }
-            String stepId = step.getStepId();
-            if (completed.contains(stepId) || failed.contains(stepId)) {
-                continue;
-            }
-            List<String> deps = step.getDependsOn();
-            if (deps == null || deps.isEmpty()) {
-                ready.add(step);
-                continue;
-            }
-            boolean allMet = deps.stream().allMatch(completed::contains);
-            if (allMet) {
-                ready.add(step);
-            }
-        }
-        return ready;
     }
 
     private void executeParallel(List<WorkflowStep> readySteps,
@@ -218,10 +211,6 @@ public class WorkflowOrchestrator {
                                  List<String> completed,
                                  List<String> failed,
                                  boolean failFast) {
-        log.info("[workflow] 并行执行步骤: sessionId={}, stepCount={}, steps={}",
-                context != null ? context.getSessionId() : "unknown",
-                readySteps.size(),
-                readySteps.stream().map(WorkflowStep::getStepId).toList());
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (WorkflowStep step : readySteps) {
             futures.add(CompletableFuture.runAsync(() -> executeStep(step, context, completed, failed, failFast)));
@@ -230,7 +219,7 @@ public class WorkflowOrchestrator {
             try {
                 future.join();
             } catch (Exception e) {
-                log.warn("[workflow] 并行步骤执行异常: error={}", e.getMessage());
+                log.warn("[workflow] execute step failed in round loop|runId={} |error={}", context.getRunId(), e.getMessage());
             }
         }
     }
@@ -240,10 +229,6 @@ public class WorkflowOrchestrator {
                                    List<String> completed,
                                    List<String> failed,
                                    boolean failFast) {
-        log.info("[workflow] 串行执行步骤: sessionId={}, stepCount={}, steps={}",
-                context != null ? context.getSessionId() : "unknown",
-                readySteps.size(),
-                readySteps.stream().map(WorkflowStep::getStepId).toList());
         for (WorkflowStep step : readySteps) {
             executeStep(step, context, completed, failed, failFast);
             if (failFast && !failed.isEmpty()) {
@@ -252,103 +237,303 @@ public class WorkflowOrchestrator {
         }
     }
 
-    /**
-     * 执行单个步骤并在异常时进入决策表分流。
-     */
     private void executeStep(WorkflowStep step,
                              WorkflowContext context,
                              List<String> completed,
                              List<String> failed,
                              boolean failFast) {
+        String runId = context.getRunId();
+        String stepId = step.getStepId();
+        WorkflowStep runtimeStep = resolveRuntimeStep(step, runId, stepId);
+
+        if (!stepClaimService.claimStepCas(runId, stepId)) {
+            // Step claim failed: treat as unclaimed to keep flow idempotent and observable.
+            handleUnclaimedStep(runId, stepId, context, completed, failed);
+            return;
+        }
+
+        executionRunService.markRunning(runId, stepId);
+        context.putAttribute("workflow.runtime.step." + stepId, stepClaimService.buildStepRuntimeView(runId, stepId));
+        StepHeartbeat heartbeat = startHeartbeat(runId, stepId);
+
+        String effectKey = null;
+        String providerTrace = null;
         try {
-            String sessionId = context != null ? context.getSessionId() : "unknown";
-            log.info("[workflow] 步骤开始: sessionId={}, stepId={}, capability={}, sideEffect={}, doneCheckRef={}",
-                    sessionId, step.getStepId(), step.getCapabilityName(), step.getSideEffect(), step.getDoneCheckRef());
-            toolInputValidator.validate(step, context);
-            Object output = executeCapability(step.getCapabilityName(), step.getParameters(), context);
-            toolOutputValidator.validate(step, context, output);
-            completed.add(step.getStepId());
-            clearRetryCount(context, step.getStepId());
-            log.info("[workflow] 步骤完成: stepId={}, capability={}, sessionId={}",
-                    step.getStepId(), step.getCapabilityName(), sessionId);
-        } catch (Exception e) {
-            DecisionResult decision = decideFailure(step, context, e);
-            if (context != null) {
-                context.putAttribute("workflow.lastDecision." + step.getStepId(), decision);
-            }
-            log.warn("[workflow] 步骤失败: stepId={}, action={}, reason={}, error={}",
-                    step.getStepId(),
-                    decision.getAction(),
-                    decision.getReasonCode(),
-                    e.getMessage());
+            log.info("[workflow] step execution started|runId={} |stepId={} |capability={} |sideEffect={}",
+                    runId, stepId, runtimeStep.getCapabilityName(), runtimeStep.getSideEffect());
 
-            if (decision.getAction() == ExecutionEnums.DecisionAction.RETRY) {
-                int retryCount = incrementRetryCount(context, step.getStepId());
-                log.info("[workflow] 步骤重试: stepId={}, retryCount={}", step.getStepId(), retryCount);
-                executeStep(step, context, completed, failed, failFast);
-                return;
-            }
-
-            if (context == null) {
-                failed.add(step.getStepId());
-                return;
-            }
-
-            switch (decision.getAction()) {
-                case WAIT -> {
-                    context.putAttribute("workflow.waiting", true);
-                    context.putAttribute("workflow.waiting.reason", decision.getReasonCode());
-                    log.info("[workflow] 进入等待: stepId={}, reason={}", step.getStepId(), decision.getReasonCode());
+            if (isWriteSideEffect(runtimeStep)) {
+                effectKey = effectLatchService.buildEffectKey(runId, stepId);
+                ExecutionEffectLatchEntity latch = effectLatchService.reserve(
+                        runId,
+                        stepId,
+                        effectKey,
+                        executionRunService.sha256Hex(safeJson(runtimeStep.getParameters()))
+                );
+                if (latch == null) {
+                    throw new IllegalStateException("effect_latch_reserve_failed");
                 }
-                case REPLAN -> {
-                    context.putAttribute("workflow.replan.required", true);
-                    log.info("[workflow] 标记重规划: stepId={}, reason={}", step.getStepId(), decision.getReasonCode());
+                String effectStatus = latch.getStatus();
+                context.putAttribute("workflow.effect.status." + stepId, effectStatus);
+                context.putAttribute("workflow.effect.status", effectStatus);
+                if (latch.getProviderTrace() != null && !latch.getProviderTrace().isBlank()) {
+                    providerTrace = latch.getProviderTrace();
+                    context.putAttribute("workflow.effect.providerTrace." + stepId, providerTrace);
                 }
-                case FALLBACK_TOOL -> {
-                    List<String> fallbackTools = resolveEffectiveFallbackTools(step);
-                    context.putAttribute("workflow.fallback.required", true);
-                    context.putAttribute("workflow.fallback.tools." + step.getStepId(), fallbackTools);
-                    if (!fallbackTools.isEmpty()) {
-                        context.putAttribute("workflow.fallback.selected." + step.getStepId(), fallbackTools.get(0));
-                    }
-                    log.info("[workflow] 标记切换备选工具: stepId={}, reason={}, tools={}",
-                            step.getStepId(), decision.getReasonCode(), fallbackTools);
-                }
-                case DEGRADE_OUTPUT -> {
-                    context.putAttribute("workflow.degrade.required", true);
-                    context.putAttribute("workflow.degrade.reason", decision.getReasonCode());
-                    context.putAttribute("workflow.degrade.stepId", step.getStepId());
-                    context.putAttribute("workflow.quality.gate", true);
-                    if (!context.getAttributes().containsKey("answer")
-                            || context.getAttributes().get("answer") == null
-                            || String.valueOf(context.getAttributes().get("answer")).isBlank()) {
-                        context.putAttribute("answer", "当前结果结构不完整，已自动降级为保守输出。");
-                    }
-                    completed.add(step.getStepId());
-                    clearRetryCount(context, step.getStepId());
-                    log.warn("[workflow] 执行降级输出: stepId={}, reason={}", step.getStepId(), decision.getReasonCode());
+                if (EffectStatus.APPLIED.name().equals(effectStatus)) {
+                    log.info("[workflow] effect latch already applied, skip duplicate side effect|runId={} |stepId={} |effectKey={}",
+                            runId, stepId, effectKey);
+                    stepClaimService.markSucceeded(runId, stepId, latch.getResponseDigest());
+                    addUnique(completed, stepId);
                     return;
                 }
-                case ABORT -> log.warn("[workflow] 终止步骤执行: stepId={}, reason={}", step.getStepId(), decision.getReasonCode());
-                default -> {
+                if (!EffectStatus.RESERVED.name().equals(effectStatus)) {
+                    throw new IllegalStateException("effect_latch_status_invalid:" + effectStatus);
+                }
+            }
+            toolInputValidator.validate(runtimeStep, context);
+            Object output = executeCapability(runtimeStep.getCapabilityName(), runtimeStep.getParameters(), context);
+            providerTrace = resolveProviderTrace(output, context, stepId);
+            toolOutputValidator.validate(runtimeStep, context, output);
+
+            String outputSummary = summarizeAndMaskOutput(output);
+            stepClaimService.updateOutputSnapshot(runId, stepId, outputSummary);
+            stepClaimService.markSucceeded(runId, stepId, outputSummary);
+            context.putAttribute("workflow.execution.attempt", stepClaimService.getAttempt(runId, stepId));
+            context.putAttribute("workflow.execution.reason", "");
+
+            if (effectKey != null) {
+                effectLatchService.markApplied(runId, stepId, effectKey, providerTrace, outputSummary);
+                context.putAttribute("workflow.effect.status." + stepId, EffectStatus.APPLIED.name());
+                context.putAttribute("workflow.effect.status", EffectStatus.APPLIED.name());
+            }
+
+            addUnique(completed, stepId);
+            log.info("[workflow] step execution succeeded|runId={} |stepId={}", runId, stepId);
+        } catch (Exception e) {
+            DecisionResult decision = decideFailure(step, context, e);
+            context.putAttribute("workflow.lastDecision." + stepId, decision);
+            String reasonCode = decision.getReasonCode();
+            context.putAttribute("workflow.execution.attempt", stepClaimService.getAttempt(runId, stepId));
+            context.putAttribute("workflow.execution.reason", reasonCode);
+
+            if (effectKey != null) {
+                if (providerTrace == null || providerTrace.isBlank()) {
+                    Object fromContext = context.getAttributes().get("workflow.effect.providerTrace." + stepId);
+                    providerTrace = fromContext == null ? null : String.valueOf(fromContext);
+                }
+                effectLatchService.markUnknown(
+                        runId,
+                        stepId,
+                        effectKey,
+                        providerTrace,
+                        "STEP_EXCEPTION",
+                        truncateError(e.getMessage())
+                );
+                context.putAttribute("workflow.effect.status." + stepId, EffectStatus.UNKNOWN.name());
+                context.putAttribute("workflow.effect.status", EffectStatus.UNKNOWN.name());
+            }
+
+            log.warn("[workflow] step execution failed|runId={} |stepId={} |action={} |reason={} |error={}",
+                    runId, stepId, decision.getAction(), reasonCode, e.getMessage());
+
+            if (decision.getAction() == ExecutionEnums.DecisionAction.RETRY) {
+                boolean retryScheduled = stepClaimService.markRetryPending(
+                        runId,
+                        stepId,
+                        reasonCode,
+                        reasonCode,
+                        truncateError(e.getMessage())
+                );
+                if (retryScheduled) {
+                    log.info("[workflow] retry scheduled for step|runId={} |stepId={}", runId, stepId);
+                    executeStep(step, context, completed, failed, failFast);
+                    return;
                 }
             }
 
-            failed.add(step.getStepId());
-            context.putAttribute("workflow.error", e.getMessage());
+            if (decision.getAction() == ExecutionEnums.DecisionAction.FALLBACK_TOOL) {
+                String fallbackTool = stepClaimService.scheduleFallbackRetry(
+                        runId,
+                        stepId,
+                        "fallback_tool",
+                        "FALLBACK_TOOL",
+                        truncateError(e.getMessage())
+                );
+                if (fallbackTool != null && !fallbackTool.isBlank()) {
+                    context.putAttribute("workflow.fallback.required", true);
+                    context.putAttribute("workflow.fallback.selected." + stepId, fallbackTool);
+                    context.putAttribute("workflow.execution.reason", "fallback_tool");
+                    log.info("[workflow] fallback tool selected|runId={} |stepId={} |fromTool={} |toTool={}",
+                            runId, stepId, runtimeStep.getCapabilityName(), fallbackTool);
+                    executeStep(step, context, completed, failed, failFast);
+                    return;
+                }
+            }
+            handleFailureDecision(step, context, decision, e, failed);
             if (failFast) {
                 return;
             }
+        } finally {
+            heartbeat.stop();
         }
     }
 
+    private void handleUnclaimedStep(String runId,
+                                     String stepId,
+                                     WorkflowContext context,
+                                     List<String> completed,
+                                     List<String> failed) {
+        ExecutionStepRunEntity current = stepClaimService.findStepRun(runId, stepId);
+        if (current == null || current.getStatus() == null) {
+            log.warn("[workflow] step status missing after execution, mark as failed|runId={} |stepId={}", runId, stepId);
+            addUnique(failed, stepId);
+            context.putAttribute("workflow.error", "step_run_not_found");
+            return;
+        }
+
+        String status = current.getStatus();
+        if (StepStatus.SUCCEEDED.name().equals(status) || StepStatus.SKIPPED.name().equals(status)) {
+            addUnique(completed, stepId);
+            log.info("[workflow] step terminal status observed|runId={} |stepId={} |status={}", runId, stepId, status);
+            return;
+        }
+        if (StepStatus.FAILED.name().equals(status)) {
+            addUnique(failed, stepId);
+            context.putAttribute("workflow.error", truncateError(current.getErrorMessage()));
+            log.warn("[workflow] step terminal status is FAILED|runId={} |stepId={} |reason={}",
+                    runId, stepId, current.getReasonCode());
+            return;
+        }
+        if (StepStatus.WAITING.name().equals(status)) {
+            context.putAttribute("workflow.waiting", true);
+            context.putAttribute("workflow.waiting.reason",
+                    current.getReasonCode() == null ? "need_user_input" : current.getReasonCode());
+            context.putAttribute("workflow.waiting.stepId", stepId);
+            addUnique(failed, stepId);
+            log.info("[workflow] step terminal status is WAITING|runId={} |stepId={} |reason={}",
+                    runId, stepId, current.getReasonCode());
+            return;
+        }
+
+        // RUNNING/PENDING states are transient and should be rare on this path.
+        log.info("[workflow] step terminal status is transient|runId={} |stepId={} |status={}",
+                runId, stepId, status);
+    }
+    private void handleFailureDecision(WorkflowStep step,
+                                       WorkflowContext context,
+                                       DecisionResult decision,
+                                       Exception e,
+                                       List<String> failed) {
+        String runId = context.getRunId();
+        String stepId = step.getStepId();
+        String reasonCode = decision.getReasonCode();
+
+        switch (decision.getAction()) {
+            case WAIT -> {
+                context.putAttribute("workflow.waiting", true);
+                context.putAttribute("workflow.waiting.reason", reasonCode);
+                context.putAttribute("workflow.waiting.stepId", stepId);
+                stepClaimService.markWaiting(runId, stepId, reasonCode, "NEED_USER_INPUT", truncateError(e.getMessage()));
+                executionRunService.markWaiting(runId, stepId, reasonCode, truncateError(e.getMessage()));
+            }
+            case REPLAN -> {
+                context.putAttribute("workflow.replan.required", true);
+                stepClaimService.markFailed(runId, stepId, reasonCode, "REPLAN_REQUIRED", truncateError(e.getMessage()));
+            }
+            case FALLBACK_TOOL -> {
+                List<String> fallbackTools = resolveEffectiveFallbackTools(step);
+                context.putAttribute("workflow.fallback.required", true);
+                context.putAttribute("workflow.fallback.tools." + stepId, fallbackTools);
+                if (!fallbackTools.isEmpty()) {
+                    context.putAttribute("workflow.fallback.selected." + stepId, fallbackTools.get(0));
+                }
+                stepClaimService.markFailed(runId, stepId, "fallback_unavailable", "FALLBACK_UNAVAILABLE", truncateError(e.getMessage()));
+            }
+            case DEGRADE_OUTPUT -> {
+                context.putAttribute("workflow.degrade.required", true);
+                context.putAttribute("workflow.degrade.reason", reasonCode);
+                context.putAttribute("workflow.degrade.stepId", stepId);
+                context.putAttribute("workflow.quality.gate", true);
+                if (!context.getAttributes().containsKey("answer")
+                        || context.getAttributes().get("answer") == null
+                        || String.valueOf(context.getAttributes().get("answer")).isBlank()) {
+                    context.putAttribute("answer", "Result is incomplete and has been degraded.");
+                }
+                // Degraded success: mark step as succeeded with minimal output payload.
+                stepClaimService.markSucceeded(runId, stepId, "{\"degraded\":true}");
+                return;
+            }
+            case ABORT -> {
+                stepClaimService.markFailed(runId, stepId, reasonCode, "ABORTED", truncateError(e.getMessage()));
+                executionRunService.markAborted(runId, reasonCode, truncateError(e.getMessage()));
+            }
+            default -> stepClaimService.markFailed(runId, stepId, reasonCode, "STEP_FAILED", truncateError(e.getMessage()));
+        }
+
+        addUnique(failed, stepId);
+        context.putAttribute("workflow.error", truncateError(e.getMessage()));
+    }
+
+    private WorkflowStep resolveRuntimeStep(WorkflowStep sourceStep, String runId, String stepId) {
+        WorkflowStep runtime = copyStep(sourceStep);
+        if (runtime == null || runId == null || stepId == null) {
+            return runtime;
+        }
+        String activeCapability = stepClaimService.getEffectiveCapability(runId, stepId);
+        if (activeCapability != null && !activeCapability.isBlank()) {
+            runtime.setCapabilityName(activeCapability);
+        }
+        return runtime;
+    }
+
+    private WorkflowStep copyStep(WorkflowStep sourceStep) {
+        if (sourceStep == null) {
+            return null;
+        }
+        RetryPolicy retryPolicy = sourceStep.getRetryPolicy() == null ? null : RetryPolicy.builder()
+                .maxRetries(sourceStep.getRetryPolicy().getMaxRetries())
+                .backoffMs(sourceStep.getRetryPolicy().getBackoffMs())
+                .retryableErrorCodes(sourceStep.getRetryPolicy().getRetryableErrorCodes() == null
+                        ? null
+                        : new ArrayList<>(sourceStep.getRetryPolicy().getRetryableErrorCodes()))
+                .build();
+        FailurePolicy failurePolicy = sourceStep.getFailurePolicy() == null ? null : FailurePolicy.builder()
+                .fallbackTools(sourceStep.getFailurePolicy().getFallbackTools() == null
+                        ? null
+                        : new ArrayList<>(sourceStep.getFailurePolicy().getFallbackTools()))
+                .replanAllowed(sourceStep.getFailurePolicy().isReplanAllowed())
+                .needUserInputOnFailure(sourceStep.getFailurePolicy().isNeedUserInputOnFailure())
+                .resumeMode(sourceStep.getFailurePolicy().getResumeMode())
+                .build();
+        return WorkflowStep.builder()
+                .stepId(sourceStep.getStepId())
+                .capabilityName(sourceStep.getCapabilityName())
+                .dependsOn(sourceStep.getDependsOn() == null ? null : new ArrayList<>(sourceStep.getDependsOn()))
+                .parameters(sourceStep.getParameters() == null ? null : new LinkedHashMap<>(sourceStep.getParameters()))
+                .sideEffect(sourceStep.getSideEffect())
+                .doneCheckRef(sourceStep.getDoneCheckRef())
+                .outputSchema(sourceStep.getOutputSchema() == null ? null : new LinkedHashMap<>(sourceStep.getOutputSchema()))
+                .doneCheck(sourceStep.getDoneCheck())
+                .schemaVersion(sourceStep.getSchemaVersion())
+                .semanticVersion(sourceStep.getSemanticVersion())
+                .retryPolicy(retryPolicy)
+                .failurePolicy(failurePolicy)
+                .build();
+    }
     private DecisionResult decideFailure(WorkflowStep step, WorkflowContext context, Exception e) {
         String reasonCode = resolveFailureReasonCode(e);
+        String runId = context != null ? context.getRunId() : null;
+        int retryCount = runId == null ? 0 : stepClaimService.getAttempt(runId, step.getStepId());
+        int maxRetries = runId == null
+                ? resolveMaxRetries(step)
+                : stepClaimService.getMaxRetries(runId, step.getStepId(), resolveMaxRetries(step));
+
         FailureContext failureContext = FailureContext.builder()
                 .errorCategory(resolveErrorCategory(e, reasonCode))
                 .failureReasonCode(reasonCode)
-                .retryCount(getRetryCount(context, step.getStepId()))
-                .maxRetries(resolveMaxRetries(step))
+                .retryCount(retryCount)
+                .maxRetries(maxRetries)
                 .hasFallbackTool(resolveHasFallback(step))
                 .replanAllowed(resolveReplanAllowed(step))
                 .needsExternalSignal(resolveNeedsExternalSignal(step, reasonCode))
@@ -356,23 +541,321 @@ public class WorkflowOrchestrator {
                 .effectState(resolveEffectState(step))
                 .preferredResumeMode(resolvePreferredResumeMode(step))
                 .build();
+
         DecisionResult decision = decisionTable.resolve(failureContext);
-        log.info("[workflow] 失败决策: stepId={}, category={}, retry={}/{}, hasFallback={}, replanAllowed={}, action={}, nextState={}, reason={}",
-                step != null ? step.getStepId() : "unknown",
+        log.info("[workflow] failure decision resolved|runId={} |stepId={} |category={} |retry={}/{} |action={} |nextState={} |reason={}",
+                runId,
+                step.getStepId(),
                 failureContext.getErrorCategory(),
                 failureContext.getRetryCount(),
                 failureContext.getMaxRetries(),
-                failureContext.isHasFallbackTool(),
-                failureContext.isReplanAllowed(),
                 decision.getAction(),
                 decision.getNextState(),
                 decision.getReasonCode());
         return decision;
     }
 
+    private void finalizeWorkflow(WorkflowContext context, List<String> completed, List<String> failed) {
+        if (context == null) {
+            return;
+        }
+        context.putAttribute("workflow.completedSteps", completed);
+        context.putAttribute("workflow.failedSteps", failed);
+
+        String runId = context.getRunId();
+        if (Boolean.TRUE.equals(context.getAttributes().get("workflow.waiting"))) {
+            context.putAttribute("workflow.status", "WAITING");
+            executionRunService.markWaiting(
+                    runId,
+                    String.valueOf(context.getAttributes().getOrDefault("workflow.waiting.stepId", "")),
+                    String.valueOf(context.getAttributes().getOrDefault("workflow.waiting.reason", "need_user_input")),
+                    null
+            );
+            log.info("[workflow] workflow finished|runId={} |status=WAITING |completed={} |failed={}",
+                    runId, completed, failed);
+            return;
+        }
+
+        if (failed.isEmpty()) {
+            context.putAttribute("workflow.status", "SUCCESS");
+            executionRunService.markSucceeded(runId);
+            log.info("[workflow] workflow finished|runId={} |status=SUCCESS |completed={} |failed={}",
+                    runId, completed, failed);
+            return;
+        }
+
+        context.putAttribute("workflow.status", "FAILED");
+        executionRunService.markFailed(runId, "WORKFLOW_FAILED", "step failed");
+        log.info("[workflow] workflow finished|runId={} |status=FAILED |completed={} |failed={}",
+                runId, completed, failed);
+    }
+    private void ensureRunContext(WorkflowDefinition workflow, WorkflowContext context) {
+        if (context.getRunId() != null && !context.getRunId().isBlank()) {
+            return;
+        }
+        String sessionId = context.getSessionId() == null ? "unknown-session" : context.getSessionId();
+        String turnId = String.valueOf(context.getAttributes().getOrDefault("turnId", "adhoc-turn"));
+        String requestHash = executionRunService.sha256Hex(sessionId + "|" + turnId + "|" + context.getQuery());
+        String dedupeKey = executionRunService.buildRequestDedupeKey(sessionId, turnId, requestHash);
+        String planHash = buildWorkflowPlanHash(workflow);
+
+        var run = executionRunService.createOrReplayRun(
+                sessionId,
+                turnId,
+                dedupeKey,
+                planHash,
+                workflow.getId()
+        );
+        context.setRunId(run.getRunId());
+        context.setWorkerId(executionPersistenceProperties.getPersistence().getWorkerId());
+        context.putAttribute("workflow.request.dedupe.key", dedupeKey);
+        context.putAttribute("workflow.plan.hash", planHash);
+        log.info("[workflow] run persisted before execution|runId={} |sessionId={} |turnId={} |workflowId={}",
+                run.getRunId(), sessionId, turnId, workflow.getId());
+    }
+
+    /**
+     * Build deterministic plan hash from normalized workflow structure.
+     */
+    private String buildWorkflowPlanHash(WorkflowDefinition workflow) {
+        if (workflow == null) {
+            return executionRunService.sha256Hex("");
+        }
+        Map<String, Object> canonical = new LinkedHashMap<>();
+        canonical.put("id", workflow.getId());
+        canonical.put("name", workflow.getName());
+        canonical.put("metadata", canonicalizeValue(workflow.getMetadata()));
+
+        List<Map<String, Object>> steps = new ArrayList<>();
+        if (workflow.getSteps() != null) {
+            for (WorkflowStep step : workflow.getSteps()) {
+                if (step == null) {
+                    continue;
+                }
+                Map<String, Object> stepCanonical = new LinkedHashMap<>();
+                stepCanonical.put("stepId", step.getStepId());
+                stepCanonical.put("capabilityName", step.getCapabilityName());
+                stepCanonical.put("dependsOn", canonicalizeValue(step.getDependsOn()));
+                stepCanonical.put("parameters", canonicalizeValue(step.getParameters()));
+                stepCanonical.put("sideEffect", step.getSideEffect());
+                stepCanonical.put("doneCheckRef", step.getDoneCheckRef());
+                stepCanonical.put("outputSchema", canonicalizeValue(step.getOutputSchema()));
+                stepCanonical.put("doneCheck", canonicalizeValue(step.getDoneCheck()));
+                stepCanonical.put("schemaVersion", step.getSchemaVersion());
+                stepCanonical.put("semanticVersion", step.getSemanticVersion());
+                stepCanonical.put("retryPolicy", canonicalizeValue(step.getRetryPolicy()));
+                stepCanonical.put("failurePolicy", canonicalizeValue(step.getFailurePolicy()));
+                steps.add(stepCanonical);
+            }
+        }
+        canonical.put("steps", steps);
+        return executionRunService.sha256Hex(safeJson(canonical));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object canonicalizeValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                sorted.put(String.valueOf(entry.getKey()), canonicalizeValue(entry.getValue()));
+            }
+            return sorted;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> normalized = new ArrayList<>(list.size());
+            for (Object item : list) {
+                normalized.add(canonicalizeValue(item));
+            }
+            return normalized;
+        }
+        if (value instanceof String
+                || value instanceof Number
+                || value instanceof Boolean
+                || value instanceof Enum<?>) {
+            return value;
+        }
+        try {
+            Map<String, Object> mapped = objectMapper.convertValue(value, Map.class);
+            return canonicalizeValue(mapped);
+        } catch (IllegalArgumentException ignore) {
+            return String.valueOf(value);
+        }
+    }
+
+    private void materializeStepPolicies(List<WorkflowStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return;
+        }
+        for (WorkflowStep step : steps) {
+            if (step == null) {
+                continue;
+            }
+            FailurePolicy original = step.getFailurePolicy();
+            FailurePolicy merged = FailurePolicy.builder()
+                    .fallbackTools(resolveEffectiveFallbackTools(step))
+                    .replanAllowed(resolveReplanAllowed(step))
+                    .needUserInputOnFailure(original != null && original.isNeedUserInputOnFailure())
+                    .resumeMode(resolvePreferredResumeMode(step))
+                    .build();
+            step.setFailurePolicy(merged);
+        }
+    }
+
+    private List<WorkflowStep> normalizeSteps(List<WorkflowStep> steps) {
+        List<WorkflowStep> normalized = new ArrayList<>();
+        for (int i = 0; i < steps.size(); i++) {
+            WorkflowStep source = steps.get(i);
+            if (source == null) {
+                continue;
+            }
+            WorkflowStep step = copyStep(source);
+            if (step.getStepId() == null || step.getStepId().isBlank()) {
+                step.setStepId("step-" + i);
+            }
+            normalized.add(step);
+        }
+        return normalized;
+    }
+
+    private List<WorkflowStep> findReadySteps(Map<String, WorkflowStep> stepMap,
+                                              List<String> completed,
+                                              List<String> failed) {
+        List<WorkflowStep> ready = new ArrayList<>();
+        for (WorkflowStep step : stepMap.values()) {
+            String stepId = step.getStepId();
+            if (completed.contains(stepId) || failed.contains(stepId)) {
+                continue;
+            }
+            List<String> deps = step.getDependsOn();
+            if (deps == null || deps.isEmpty() || deps.stream().allMatch(completed::contains)) {
+                ready.add(step);
+            }
+        }
+        return ready;
+    }
+
+    private String resolveProviderTrace(Object output, WorkflowContext context, String stepId) {
+        if (output instanceof Map<?, ?> outputMap) {
+            String providerTrace = firstNonBlank(
+                    readMapValue(outputMap, "providerTrace"),
+                    readMapValue(outputMap, "provider_trace"),
+                    readMapValue(outputMap, "traceId"),
+                    readMapValue(outputMap, "trace_id"),
+                    readMapValue(outputMap, "requestId"),
+                    readMapValue(outputMap, "request_id")
+            );
+            if (providerTrace != null && context != null) {
+                context.putAttribute("workflow.effect.providerTrace." + stepId, providerTrace);
+            }
+            return providerTrace;
+        }
+        return null;
+    }
+
+    private String readMapValue(Map<?, ?> source, String key) {
+        if (source == null || key == null || !source.containsKey(key)) {
+            return null;
+        }
+        Object value = source.get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private StepHeartbeat startHeartbeat(String runId, String stepId) {
+        long heartbeatSeconds = Math.max(1L, executionPersistenceProperties.getPersistence().getHeartbeatSeconds());
+        long intervalMs = heartbeatSeconds * 1000;
+        AtomicBoolean running = new AtomicBoolean(true);
+
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+            while (running.get()) {
+                try {
+                    Thread.sleep(intervalMs);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (!running.get()) {
+                    return;
+                }
+                boolean success = stepClaimService.heartbeat(runId, stepId);
+                if (!success) {
+                    log.warn("[workflow] step heartbeat renewal failed|runId={} |stepId={}, recovery thread will take over", runId, stepId);
+                    running.set(false);
+                    return;
+                }
+                log.debug("[workflow] step heartbeat renewed|runId={} |stepId={}", runId, stepId);
+            }
+        });
+
+        return () -> {
+            running.set(false);
+            future.cancel(true);
+        };
+    }
+
+    private void addUnique(List<String> target, String stepId) {
+        if (target == null || stepId == null || stepId.isBlank()) {
+            return;
+        }
+        if (!target.contains(stepId)) {
+            target.add(stepId);
+        }
+    }
+
+    @FunctionalInterface
+    private interface StepHeartbeat {
+        void stop();
+    }
+
+    private boolean isWriteSideEffect(WorkflowStep step) {
+        ExecutionEnums.SideEffectType type = resolveSideEffect(step);
+        return type == ExecutionEnums.SideEffectType.WRITE || type == ExecutionEnums.SideEffectType.EXTERNAL;
+    }
+
+    private String summarizeAndMaskOutput(Object output) {
+        try {
+            String json = safeJson(output);
+            // Store masked/truncated output snapshot to avoid oversized payload persistence.
+            return json
+                    .replaceAll("(?i)\\\"(api[-_]?key|token|secret|password)\\\"\\s*:\\s*\\\"[^\\\"]*\\\"", "\"$1\":\"***\"")
+                    .replaceAll("(?i)ALIYUN[A-Z0-9_]*", "***");
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private String safeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private int resolveGlobalDefaultMaxRetries() {
+        Integer global = schemaValidationProperties.getGlobalMaxRetries();
+        return global == null ? 2 : Math.max(0, global);
+    }
+
     private ExecutionEnums.ErrorCategory resolveErrorCategory(Exception e, String reasonCode) {
-        if (e instanceof ToolValidationException validationException
-                && validationException.getErrorCategory() != null) {
+        if (e instanceof ToolValidationException validationException && validationException.getErrorCategory() != null) {
             return validationException.getErrorCategory();
         }
         if ("missing_required_input".equals(reasonCode) || "need_user_clarification".equals(reasonCode)) {
@@ -451,9 +934,6 @@ public class WorkflowOrchestrator {
         return "runtime_error";
     }
 
-    /**
-     * 优先级：step.retryPolicy > tool-default > global-default。
-     */
     private int resolveMaxRetries(WorkflowStep step) {
         if (step != null && step.getRetryPolicy() != null && step.getRetryPolicy().getMaxRetries() != null) {
             return Math.max(0, step.getRetryPolicy().getMaxRetries());
@@ -474,9 +954,6 @@ public class WorkflowOrchestrator {
         return !resolveEffectiveFallbackTools(step).isEmpty();
     }
 
-    /**
-     * 优先级：step.failurePolicy.fallbackTools > tool-default > global-default。
-     */
     private List<String> resolveEffectiveFallbackTools(WorkflowStep step) {
         if (step == null) {
             return List.of();
@@ -486,8 +963,7 @@ public class WorkflowOrchestrator {
                 && !step.getFailurePolicy().getFallbackTools().isEmpty()) {
             return step.getFailurePolicy().getFallbackTools();
         }
-        if (step.getCapabilityName() != null
-                && schemaValidationProperties.getToolDefaultFallbacks() != null) {
+        if (step.getCapabilityName() != null && schemaValidationProperties.getToolDefaultFallbacks() != null) {
             List<String> toolDefault = schemaValidationProperties.getToolDefaultFallbacks().get(step.getCapabilityName());
             if (toolDefault != null && !toolDefault.isEmpty()) {
                 return toolDefault;
@@ -544,50 +1020,6 @@ public class WorkflowOrchestrator {
         return ExecutionEnums.EffectState.NOT_APPLIED;
     }
 
-    @SuppressWarnings("unchecked")
-    private int getRetryCount(WorkflowContext context, String stepId) {
-        if (context == null || stepId == null) {
-            return 0;
-        }
-        Object raw = context.getAttributes().get(ATTR_RETRY_COUNTS);
-        if (!(raw instanceof Map<?, ?>)) {
-            return 0;
-        }
-        Map<String, Integer> retryCounts = (Map<String, Integer>) raw;
-        return retryCounts.getOrDefault(stepId, 0);
-    }
-
-    @SuppressWarnings("unchecked")
-    private int incrementRetryCount(WorkflowContext context, String stepId) {
-        if (context == null || stepId == null) {
-            return 0;
-        }
-        Object raw = context.getAttributes().get(ATTR_RETRY_COUNTS);
-        Map<String, Integer> retryCounts;
-        if (raw instanceof Map<?, ?> map) {
-            retryCounts = (Map<String, Integer>) map;
-        } else {
-            retryCounts = new HashMap<>();
-            context.putAttribute(ATTR_RETRY_COUNTS, retryCounts);
-        }
-        int next = retryCounts.getOrDefault(stepId, 0) + 1;
-        retryCounts.put(stepId, next);
-        return next;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void clearRetryCount(WorkflowContext context, String stepId) {
-        if (context == null || stepId == null) {
-            return;
-        }
-        Object raw = context.getAttributes().get(ATTR_RETRY_COUNTS);
-        if (!(raw instanceof Map<?, ?>)) {
-            return;
-        }
-        Map<String, Integer> retryCounts = (Map<String, Integer>) raw;
-        retryCounts.remove(stepId);
-    }
-
     private boolean isParallelizable(WorkflowDefinition workflow) {
         if (workflow.getMetadata() == null) {
             return false;
@@ -606,17 +1038,27 @@ public class WorkflowOrchestrator {
 
     private Object executeCapability(String capabilityName, Map<String, Object> parameters, WorkflowContext context) {
         if (capabilityName == null || capabilityName.isBlank()) {
-            log.warn("[workflow] capabilityName 为空，跳过执行");
+            log.warn("[workflow] empty capabilityName, skip execution");
             return null;
         }
-        String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("[workflow] 执行能力: sessionId={}, capability={}", sessionId, capabilityName);
-
         CapabilityExecutor executor = workflowRegistry.getExecutor(capabilityName);
         if (executor == null) {
-            log.warn("[workflow] 未找到能力执行器: capability={}", capabilityName);
+            log.warn("[workflow] capability executor not found, skip step|capability={}", capabilityName);
             return null;
         }
         return executor.execute(parameters, context);
     }
+
+    private String truncateError(String errorMessage) {
+        if (errorMessage == null) {
+            return null;
+        }
+        if (errorMessage.length() <= 500) {
+            return errorMessage;
+        }
+        return errorMessage.substring(0, 500);
+    }
 }
+
+
+

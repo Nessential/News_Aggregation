@@ -13,7 +13,6 @@ import java.util.Map;
 
 /**
  * 工作流上下文。
- * 记录执行过程中的中间数据。
  */
 @Data
 @Builder
@@ -21,24 +20,32 @@ import java.util.Map;
 @AllArgsConstructor
 public class WorkflowContext {
 
-    /** 会话 ID */
+    /** 会话ID。 */
     private String sessionId;
 
-    /** 用户查询 */
+    /** 运行ID（第三周持久化执行主键）。 */
+    private String runId;
+
+    /** 当前worker标识。 */
+    private String workerId;
+
+    /** 是否恢复模式执行。 */
+    private Boolean recoveryMode;
+
+    /** 用户查询。 */
     private String query;
 
-    /** 任务类型 */
+    /** 任务类型。 */
     private String taskFamily;
 
-    /** 证据列表 */
+    /** 证据列表。 */
     @Builder.Default
     private List<RetrievalResult> evidence = new ArrayList<>();
 
-    /** 扩展属性 */
+    /** 扩展属性。 */
     @Builder.Default
     private Map<String, Object> attributes = new HashMap<>();
 
-    /** 添加证据 */
     public void addEvidence(List<RetrievalResult> results) {
         if (results == null || results.isEmpty()) {
             return;
@@ -46,7 +53,6 @@ public class WorkflowContext {
         this.evidence.addAll(results);
     }
 
-    /** 写入属性 */
     public void putAttribute(String key, Object value) {
         this.attributes.put(key, value);
     }

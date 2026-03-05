@@ -17,11 +17,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Turn 生命周期管理器。
- * <p>
- * 职责：
- * 1) 持久化单轮执行状态；
- * 2) 维护幂等记录（IN_PROGRESS/DONE/FAILED）；
- * 3) 提供结果快照回放能力。
  */
 @Slf4j
 @Service
@@ -39,9 +34,6 @@ public class TurnManager {
     @Value("${app.agent.turn.idempotent-prefix:idem:}")
     private String idempotentKeyPrefix;
 
-    /**
-     * 创建并持久化 RUNNING 状态的 turn。
-     */
     public TurnState createRunningTurn(String sessionId, String turnId, String requestHash) {
         LocalDateTime now = LocalDateTime.now();
         TurnState state = TurnState.builder()
@@ -54,13 +46,29 @@ public class TurnManager {
                 .updatedAt(now)
                 .build();
         saveTurnState(state);
-        log.info("[turn] 创建运行中轮次: sessionId={}, turnId={}", sessionId, turnId);
+        log.info("[turn] 创建运行中turn|sessionId={} |turnId={}", sessionId, turnId);
         return state;
     }
 
-    /**
-     * 更新 turn 内 FSM 状态，便于定位状态紊乱问题。
-     */
+    public void bindRunId(String sessionId, String turnId, String runId) {
+        if (runId == null || runId.isBlank()) {
+            return;
+        }
+        TurnState current = getTurnState(sessionId, turnId);
+        if (current == null) {
+            current = createRunningTurn(sessionId, turnId, "");
+        }
+        current.setRunId(runId);
+        current.setUpdatedAt(LocalDateTime.now());
+        saveTurnState(current);
+        log.info("[turn] 绑定runId|sessionId={} |turnId={} |runId={}", sessionId, turnId, runId);
+    }
+
+    public String getBoundRunId(String sessionId, String turnId) {
+        TurnState turnState = getTurnState(sessionId, turnId);
+        return turnState == null ? null : turnState.getRunId();
+    }
+
     public void updateFsmState(String sessionId, String turnId, ConversationState fsmState) {
         TurnState current = getTurnState(sessionId, turnId);
         if (current == null) {
@@ -71,9 +79,6 @@ public class TurnManager {
         saveTurnState(current);
     }
 
-    /**
-     * 标记 turn 成功完成并写入结果快照。
-     */
     public void markTurnDone(String sessionId, String turnId, AgentResponse response) {
         TurnState current = getTurnState(sessionId, turnId);
         if (current == null) {
@@ -85,12 +90,9 @@ public class TurnManager {
         current.setUpdatedAt(now);
         current.setFinishedAt(now);
         saveTurnState(current);
-        log.info("[turn] 轮次执行完成: sessionId={}, turnId={}", sessionId, turnId);
+        log.info("[turn] turn完成|sessionId={} |turnId={}", sessionId, turnId);
     }
 
-    /**
-     * 标记 turn 失败并保存错误信息。
-     */
     public void markTurnFailed(String sessionId, String turnId, String errorCode, String errorMessage) {
         TurnState current = getTurnState(sessionId, turnId);
         if (current == null) {
@@ -103,19 +105,13 @@ public class TurnManager {
         current.setUpdatedAt(now);
         current.setFinishedAt(now);
         saveTurnState(current);
-        log.warn("[turn] 轮次执行失败: sessionId={}, turnId={}, errorCode={}", sessionId, turnId, errorCode);
+        log.warn("[turn] turn失败|sessionId={} |turnId={} |errorCode={}", sessionId, turnId, errorCode);
     }
 
-    /**
-     * 查询 turn 状态。
-     */
     public TurnState getTurnState(String sessionId, String turnId) {
         return (TurnState) redisTemplate.opsForValue().get(buildTurnKey(sessionId, turnId));
     }
 
-    /**
-     * 幂等记录：查询。
-     */
     public IdempotencyRecord getIdempotencyRecord(String sessionId, String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             return null;
@@ -123,9 +119,6 @@ public class TurnManager {
         return (IdempotencyRecord) redisTemplate.opsForValue().get(buildIdempotentKey(sessionId, idempotencyKey));
     }
 
-    /**
-     * 幂等记录：尝试创建 IN_PROGRESS（原子 setIfAbsent）。
-     */
     public boolean tryCreateInProgressRecord(String sessionId,
                                              String idempotencyKey,
                                              String turnId,
@@ -151,15 +144,12 @@ public class TurnManager {
         );
         boolean success = Boolean.TRUE.equals(created);
         if (success) {
-            log.info("[idem] 创建处理中记录: sessionId={}, idempotencyKey={}, turnId={}",
+            log.info("[idem] 创建IN_PROGRESS记录|sessionId={} |idempotencyKey={} |turnId={}",
                     sessionId, idempotencyKey, turnId);
         }
         return success;
     }
 
-    /**
-     * 幂等记录：更新为 DONE 并保存响应快照。
-     */
     public void markIdempotencyDone(String sessionId,
                                     String idempotencyKey,
                                     String turnId,
@@ -181,13 +171,10 @@ public class TurnManager {
         record.setErrorMessage(null);
         record.setUpdatedAt(now);
         saveIdempotencyRecord(sessionId, idempotencyKey, record);
-        log.info("[idem] 更新为完成: sessionId={}, idempotencyKey={}, turnId={}",
+        log.info("[idem] 标记DONE|sessionId={} |idempotencyKey={} |turnId={}",
                 sessionId, idempotencyKey, turnId);
     }
 
-    /**
-     * 幂等记录：更新为 FAILED 并保存错误快照。
-     */
     public void markIdempotencyFailed(String sessionId,
                                       String idempotencyKey,
                                       String turnId,
@@ -211,7 +198,7 @@ public class TurnManager {
         record.setResponseSnapshot(failedResponse);
         record.setUpdatedAt(now);
         saveIdempotencyRecord(sessionId, idempotencyKey, record);
-        log.warn("[idem] 更新为失败: sessionId={}, idempotencyKey={}, turnId={}, errorCode={}",
+        log.warn("[idem] 标记FAILED|sessionId={} |idempotencyKey={} |turnId={} |errorCode={}",
                 sessionId, idempotencyKey, turnId, errorCode);
     }
 
@@ -241,4 +228,3 @@ public class TurnManager {
         return idempotentKeyPrefix + sessionId + ":" + idempotencyKey;
     }
 }
-
