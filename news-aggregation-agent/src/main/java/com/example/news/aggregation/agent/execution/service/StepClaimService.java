@@ -156,6 +156,7 @@ public class StepClaimService {
                         null);
                 return true;
             }
+            log.info("[step-claim] claim 失败：CAS 冲突|runId={} |stepId={} |reasonCode=claim_cas_conflict", runId, stepId);
             return false;
         }
 
@@ -178,6 +179,8 @@ public class StepClaimService {
                         null);
                 return true;
             }
+            log.info("[step-claim] takeover 失败：CAS 冲突或版本不匹配|runId={} |stepId={} |reasonCode=takeover_cas_conflict",
+                    runId, stepId);
         }
         return false;
     }

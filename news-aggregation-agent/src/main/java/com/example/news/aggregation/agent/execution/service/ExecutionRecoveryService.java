@@ -1,6 +1,7 @@
 package com.example.news.aggregation.agent.execution.service;
 
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
+import com.example.news.aggregation.agent.execution.config.ReplanControlProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
@@ -32,6 +33,7 @@ public class ExecutionRecoveryService {
     private final ExecutionRunService executionRunService;
     private final ExecutionDispatchService executionDispatchService;
     private final DecisionTable decisionTable;
+    private final ReplanControlProperties replanControlProperties;
 
     @Scheduled(fixedDelayString = "${app.agent.execution.recovery.scan-interval-ms:15000}")
     public void recoverExpiredSteps() {
@@ -298,6 +300,7 @@ public class ExecutionRecoveryService {
                 .maxRetries(maxRetries)
                 .hasFallbackTool(false)
                 .replanAllowed(Boolean.TRUE.equals(step.getReplanAllowed()))
+                .replanFeatureEnabled(replanControlProperties.isEnabled())
                 .needsExternalSignal(Boolean.TRUE.equals(step.getNeedUserInputOnFailure()))
                 .sideEffect(parseSideEffect(step.getSideEffect()))
                 .effectState(parseEffectState(step.getSideEffect()))
@@ -354,6 +357,9 @@ public class ExecutionRecoveryService {
     }
 
     private boolean isReplanAllowed(ExecutionStepRunEntity step) {
+        if (!replanControlProperties.isEnabled()) {
+            return false;
+        }
         return step != null && Boolean.TRUE.equals(step.getReplanAllowed());
     }
 

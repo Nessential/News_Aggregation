@@ -18,6 +18,9 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "app.agent.replan")
 public class ReplanControlProperties {
 
+    /** 是否启用重规划能力。关闭后 DecisionTable 的 REPLAN 分支统一映射为 ABORT。 */
+    private boolean enabled = true;
+
     /** run 级最大重规划次数 */
     private int maxReplansPerRun = 2;
     /** step 级最大重规划次数 */
@@ -43,4 +46,3 @@ public class ReplanControlProperties {
         private Integer minClusterCount;
     }
 }
-

@@ -19,4 +19,11 @@ public class ExecutionReplaySnapshot {
     private ExecutionRunEntity run;
     private List<ExecutionStepRunEntity> stepRuns;
     private List<ExecutionEventLogEntity> events;
+
+    /** 便于回放接口直接返回摘要字段。 */
+    private Integer activePlanVersion;
+    private Integer stepCount;
+    private Long eventCount;
+    private String terminalState;
+    private String timelineDigest;
 }

@@ -8,7 +8,7 @@ import lombok.Setter;
 import java.util.Date;
 
 /**
- * 运行主记录。
+ * 执行运行主记录。
  */
 @Getter
 @Setter
@@ -16,6 +16,8 @@ import java.util.Date;
 public class ExecutionRunEntity extends BaseEntity {
 
     private String runId;
+    /** 租户ID，Week6 回放鉴权使用 tenant+session 双边界。 */
+    private String tenantId;
     private String sessionId;
     private String turnId;
     private String requestDedupeKey;

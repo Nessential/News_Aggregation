@@ -22,6 +22,8 @@ public class FailureContext {
     private Integer maxRetries;
     private boolean hasFallbackTool;
     private boolean replanAllowed;
+    /** 是否启用全局 Replan 功能（Week6 灰度开关）。null 视为启用。 */
+    private Boolean replanFeatureEnabled;
     private boolean needsExternalSignal;
     private ExecutionEnums.SideEffectType sideEffect;
     private ExecutionEnums.EffectState effectState;

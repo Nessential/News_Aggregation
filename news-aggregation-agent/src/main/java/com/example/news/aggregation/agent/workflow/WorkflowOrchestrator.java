@@ -590,6 +590,7 @@ public class WorkflowOrchestrator {
                 .maxRetries(resolveMaxRetries(step))
                 .hasFallbackTool(false)
                 .replanAllowed(resolveReplanAllowed(step))
+                .replanFeatureEnabled(replanControlProperties.isEnabled())
                 .needsExternalSignal(resolveNeedsExternalSignal(step, "fallback_unavailable"))
                 .sideEffect(resolveSideEffect(step))
                 .effectState(resolveEffectState(step))
@@ -659,6 +660,7 @@ public class WorkflowOrchestrator {
                 .maxRetries(maxRetries)
                 .hasFallbackTool(resolveHasFallback(step))
                 .replanAllowed(resolveReplanAllowed(step))
+                .replanFeatureEnabled(replanControlProperties.isEnabled())
                 .needsExternalSignal(resolveNeedsExternalSignal(step, reasonCode))
                 .sideEffect(resolveSideEffect(step))
                 .effectState(resolveEffectState(step))
@@ -1370,6 +1372,9 @@ public class WorkflowOrchestrator {
     }
 
     private boolean resolveReplanAllowed(WorkflowStep step) {
+        if (!replanControlProperties.isEnabled()) {
+            return false;
+        }
         if (step == null || step.getFailurePolicy() == null) {
             return false;
         }
