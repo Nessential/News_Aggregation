@@ -8,7 +8,7 @@ import lombok.Setter;
 import java.util.Date;
 
 /**
- * 步骤运行记录。
+ * step 运行记录。
  */
 @Getter
 @Setter
@@ -17,6 +17,9 @@ public class ExecutionStepRunEntity extends BaseEntity {
 
     private String runId;
     private String stepId;
+    /** step 所属计划版本。 */
+    private Integer planVersion;
+
     private String capabilityName;
     private String activeCapabilityName;
     private String status;
@@ -31,14 +34,27 @@ public class ExecutionStepRunEntity extends BaseEntity {
     private String outputJson;
     private String sideEffect;
     private String fallbackToolsJson;
-    /** 本次实际选择执行的工具（用于恢复/排障复盘）。 */
+
+    /** 本次实际执行工具（用于恢复/回放排障）。 */
     private String selectedTool;
-    /** 本次选路原因码（primary_healthy/fallback_tool_open等）。 */
+    /** 选路原因码（如 primary_healthy / fallback_tool_open）。 */
     private String selectionReasonCode;
-    /** 熔断状态快照（可截断JSON）。 */
+    /** 熔断状态快照（可截断 JSON）。 */
     private String circuitStateSnapshot;
-    /** 参与选路的候选工具快照（可截断JSON）。 */
+    /** 候选工具快照（可截断 JSON）。 */
     private String fallbackCandidatesJson;
+
+    /** step 级重规划次数。 */
+    private Integer replanCountStep;
+    /** 最近一次重规划原因码。 */
+    private String lastReplanReasonCode;
+    /** 变化证明快照（可截断 JSON）。 */
+    private String changeProofSnapshot;
+    /** 证据快照（可截断 JSON）。 */
+    private String evidenceSnapshot;
+    /** 决策动作快照（REPLAN/ABORT/WAIT 等）。 */
+    private String replanDecisionAction;
+
     private Boolean replanAllowed;
     private Boolean needUserInputOnFailure;
     private String resumeMode;

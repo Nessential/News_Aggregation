@@ -75,6 +75,29 @@ app:
     index-name: ${news.aggregation.elasticsearch.index-name}
 
   agent:
+    replan:
+      max-replans-per-run: 2
+      max-replans-per-step: 1
+      min-source-count: 3
+      min-coverage-rate: 0.6
+      min-cluster-count: 1
+      non-retryable-reason-codes:
+        - policy_quota_auth
+        - replan_non_retryable_reason
+      evidence:
+        search_news:
+          enabled: true
+          min-source-count: 3
+          min-coverage-rate: 0.6
+          min-cluster-count: 1
+        retrieve_news:
+          enabled: true
+          min-source-count: 3
+          min-coverage-rate: 0.5
+          min-cluster-count: 1
+        llm_generate:
+          enabled: false
+
     execution:
       schema-version: execution-plan/1.0
       semantic-version: 1.0.0

@@ -37,20 +37,22 @@ public interface ExecutionStepRunMapper extends BaseMapper<ExecutionStepRunEntit
 
     @Insert("""
             INSERT IGNORE INTO agent_execution_step_run(
-                run_id, step_id, capability_name, active_capability_name, status,
+                run_id, step_id, plan_version, capability_name, active_capability_name, status,
                 attempt, max_retries, recovery_attempt, max_recovery_attempts,
                 worker_id, lease_until, depends_on_json, input_json, output_json,
                 side_effect, fallback_tools_json, selected_tool, selection_reason_code,
                 circuit_state_snapshot, fallback_candidates_json,
+                replan_count_step, last_replan_reason_code, change_proof_snapshot, evidence_snapshot, replan_decision_action,
                 replan_allowed, need_user_input_on_failure,
                 resume_mode, reason_code, error_code, error_message,
                 started_at, finished_at, deleted, lock_version, gmt_create, gmt_modified
             ) VALUES (
-                #{runId}, #{stepId}, #{capabilityName}, #{activeCapabilityName}, #{status},
+                #{runId}, #{stepId}, #{planVersion}, #{capabilityName}, #{activeCapabilityName}, #{status},
                 #{attempt}, #{maxRetries}, #{recoveryAttempt}, #{maxRecoveryAttempts},
                 #{workerId}, #{leaseUntil}, #{dependsOnJson}, #{inputJson}, #{outputJson},
                 #{sideEffect}, #{fallbackToolsJson}, #{selectedTool}, #{selectionReasonCode},
                 #{circuitStateSnapshot}, #{fallbackCandidatesJson},
+                #{replanCountStep}, #{lastReplanReasonCode}, #{changeProofSnapshot}, #{evidenceSnapshot}, #{replanDecisionAction},
                 #{replanAllowed}, #{needUserInputOnFailure},
                 #{resumeMode}, #{reasonCode}, #{errorCode}, #{errorMessage},
                 #{startedAt}, #{finishedAt}, #{deleted}, #{lockVersion}, NOW(), NOW()
@@ -134,9 +136,18 @@ public interface ExecutionStepRunMapper extends BaseMapper<ExecutionStepRunEntit
                                              @Param("expectedLockVersion") Integer expectedLockVersion,
                                              @Param("activeCapabilityName") String activeCapabilityName,
                                              @Param("selectedTool") String selectedTool,
-                                             @Param("selectionReasonCode") String selectionReasonCode,
-                                             @Param("circuitStateSnapshot") String circuitStateSnapshot,
-                                             @Param("fallbackCandidatesJson") String fallbackCandidatesJson);
+                                              @Param("selectionReasonCode") String selectionReasonCode,
+                                              @Param("circuitStateSnapshot") String circuitStateSnapshot,
+                                              @Param("fallbackCandidatesJson") String fallbackCandidatesJson);
+
+    @Update(StepClaimSql.RECORD_REPLAN_ATTEMPT)
+    int recordReplanAttemptWithCas(@Param("runId") String runId,
+                                   @Param("stepId") String stepId,
+                                   @Param("expectedLockVersion") Integer expectedLockVersion,
+                                   @Param("reasonCode") String reasonCode,
+                                   @Param("changeProofSnapshot") String changeProofSnapshot,
+                                   @Param("evidenceSnapshot") String evidenceSnapshot,
+                                   @Param("replanDecisionAction") String replanDecisionAction);
 
     @Select("""
             SELECT *
@@ -164,4 +175,8 @@ public interface ExecutionStepRunMapper extends BaseMapper<ExecutionStepRunEntit
                                       @Param("stepId") String stepId,
                                       @Param("expectedLockVersion") Integer expectedLockVersion,
                                       @Param("inputJson") String inputJson);
+
+    @Update(StepClaimSql.SUPERSEDE_PENDING_STEPS_NOT_IN_PLAN_VERSION)
+    int supersedePendingStepsNotInPlanVersion(@Param("runId") String runId,
+                                              @Param("activePlanVersion") Integer activePlanVersion);
 }

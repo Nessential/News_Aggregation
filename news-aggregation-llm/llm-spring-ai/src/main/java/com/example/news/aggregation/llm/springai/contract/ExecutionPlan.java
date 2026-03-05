@@ -17,6 +17,12 @@ import java.util.Map;
 @AllArgsConstructor
 public class ExecutionPlan {
     private String planId;
+    /** 计划版本。Week5 用于局部重规划谱系追踪。 */
+    private Integer planVersion;
+    /** 父计划ID。首个计划可为空。 */
+    private String parentPlanId;
+    /** 本次重规划触发原因（非重规划场景可为空）。 */
+    private String replanReasonCode;
     private String goal;
     private String schemaVersion;
     private String semanticVersion;
@@ -25,4 +31,3 @@ public class ExecutionPlan {
     private ExecutionConstraints constraints;
     private Map<String, Object> metadata;
 }
-

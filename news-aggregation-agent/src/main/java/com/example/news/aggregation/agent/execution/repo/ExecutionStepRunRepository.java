@@ -157,6 +157,24 @@ public class ExecutionStepRunRepository {
         );
     }
 
+    public int recordReplanAttemptWithCas(String runId,
+                                          String stepId,
+                                          Integer expectedLockVersion,
+                                          String reasonCode,
+                                          String changeProofSnapshot,
+                                          String evidenceSnapshot,
+                                          String replanDecisionAction) {
+        return stepRunMapper.recordReplanAttemptWithCas(
+                runId,
+                stepId,
+                expectedLockVersion,
+                reasonCode,
+                changeProofSnapshot,
+                evidenceSnapshot,
+                replanDecisionAction
+        );
+    }
+
     public List<ExecutionStepRunEntity> listExpiredRunning(Integer limit) {
         return stepRunMapper.listExpiredRunning(limit);
     }
@@ -189,5 +207,9 @@ public class ExecutionStepRunRepository {
                 expectedLockVersion,
                 inputJson
         );
+    }
+
+    public int supersedePendingStepsNotInPlanVersion(String runId, Integer activePlanVersion) {
+        return stepRunMapper.supersedePendingStepsNotInPlanVersion(runId, activePlanVersion);
     }
 }

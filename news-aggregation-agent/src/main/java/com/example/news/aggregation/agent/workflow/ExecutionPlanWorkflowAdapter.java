@@ -88,6 +88,9 @@ public class ExecutionPlanWorkflowAdapter {
         metadata.put("source", "execution-plan");
         metadata.put("stepCount", steps.size());
         metadata.put("planId", plan.getPlanId());
+        metadata.put("planVersion", plan.getPlanVersion() == null ? 1 : plan.getPlanVersion());
+        metadata.put("parentPlanId", plan.getParentPlanId());
+        metadata.put("replanReasonCode", plan.getReplanReasonCode());
         metadata.put("generatedAt", LocalDateTime.now().toString());
         if (plan.getMetadata() != null) {
             metadata.putAll(plan.getMetadata());
