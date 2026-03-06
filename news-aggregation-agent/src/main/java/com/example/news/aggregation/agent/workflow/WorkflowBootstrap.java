@@ -36,16 +36,19 @@ public class WorkflowBootstrap {
                                 .stepId("qa-retrieve")
                                 .capabilityName("retrieve_news")
                                 .parameters(Map.of("mode", "HYBRID", "topK", 10))
+                                .outputSchema(itemsOutputSchema())
                                 .build(),
                         WorkflowStep.builder()
                                 .stepId("qa-rerank")
                                 .capabilityName("rerank_results")
                                 .parameters(Map.of("topK", 5, "lambda", 0.7))
+                                .outputSchema(itemsOutputSchema())
                                 .build(),
                         WorkflowStep.builder()
                                 .stepId("qa-generate")
                                 .capabilityName("llm_generate")
                                 .parameters(Map.of("taskFamily", "QA"))
+                                .outputSchema(answerOutputSchema())
                                 .build()
                 ))
                 .metadata(Map.of("type", "QA"))
@@ -61,11 +64,13 @@ public class WorkflowBootstrap {
                                 .stepId("summary-retrieve")
                                 .capabilityName("retrieve_news")
                                 .parameters(Map.of("mode", "HYBRID", "topK", 10))
+                                .outputSchema(itemsOutputSchema())
                                 .build(),
                         WorkflowStep.builder()
                                 .stepId("summary-generate")
                                 .capabilityName("llm_generate")
                                 .parameters(Map.of("taskFamily", "SUMMARIZE"))
+                                .outputSchema(answerOutputSchema())
                                 .build()
                 ))
                 .metadata(Map.of("type", "SUMMARY"))
@@ -81,19 +86,36 @@ public class WorkflowBootstrap {
                                 .stepId("timeline-retrieve")
                                 .capabilityName("retrieve_news")
                                 .parameters(Map.of("mode", "HYBRID", "topK", 15))
+                                .outputSchema(itemsOutputSchema())
                                 .build(),
                         WorkflowStep.builder()
                                 .stepId("timeline-rerank")
                                 .capabilityName("rerank_results")
                                 .parameters(Map.of("topK", 8, "lambda", 0.7))
+                                .outputSchema(itemsOutputSchema())
                                 .build(),
                         WorkflowStep.builder()
                                 .stepId("timeline-generate")
                                 .capabilityName("llm_generate")
                                 .parameters(Map.of("taskFamily", "TIMELINE"))
+                                .outputSchema(answerOutputSchema())
                                 .build()
                 ))
                 .metadata(Map.of("type", "TIMELINE"))
                 .build();
+    }
+
+    private Map<String, Object> itemsOutputSchema() {
+        return Map.of(
+                "type", "object",
+                "required", List.of("items")
+        );
+    }
+
+    private Map<String, Object> answerOutputSchema() {
+        return Map.of(
+                "type", "object",
+                "required", List.of("answer")
+        );
     }
 }
