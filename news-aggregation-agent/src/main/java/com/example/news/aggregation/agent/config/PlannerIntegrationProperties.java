@@ -48,18 +48,10 @@ public class PlannerIntegrationProperties {
 
     @Data
     public static class Graph {
-        /**
-         * 是否模板优先。开启后，简单任务优先命中模板流程。
-         */
-        private boolean templateFirst = true;
     }
 
     public PlannerMode resolvePlannerMode() {
         return PlannerMode.fromValue(planner == null ? null : planner.getMode());
-    }
-
-    public boolean isTemplateFirstEnabled() {
-        return graph != null && graph.isTemplateFirst();
     }
 
     public String resolveToolBindingMode() {

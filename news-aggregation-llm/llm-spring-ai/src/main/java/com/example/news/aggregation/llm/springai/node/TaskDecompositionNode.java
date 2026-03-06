@@ -33,7 +33,9 @@ public class TaskDecompositionNode {
             "2. rerank_results 只能在检索步骤之后使用。\n" +
             "3. 无依赖关系的步骤可以设置 parallelizable=true 以并行执行。\n" +
             "4. 步骤数量控制在 2~6 步，不要过度拆分。\n" +
-            "5. requiredTools 中的工具名必须来自上方可用工具列表。";
+            "5. requiredTools 中的工具名必须来自上方可用工具列表。\n" +
+            "6. 如果查询涉及多个实体（如\"中国和美国\"），必须为每个实体生成独立的检索任务，然后合并结果。\n" +
+            "7. 多实体查询的检索策略：每个实体单独检索 -> 合并去重 -> 生成答案。";
 
     private final ChatClient chatClient;
 
@@ -42,6 +44,7 @@ public class TaskDecompositionNode {
 
         try {
             String prompt = buildPrompt(state);
+            log.info("123");
             log.info("[task-decompose] 调用 LLM 分解任务|isReplan={}|query={}",
                     state.isReplan(), truncate(state.getQuery(), 100));
 
@@ -77,7 +80,16 @@ public class TaskDecompositionNode {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个新闻检索规划器。请将以下查询分解为可执行的子任务列表。\n\n");
         sb.append("【查询】").append(state.getQuery()).append("\n");
-        sb.append("【任务类型】").append(resolveTaskFamily(state)).append("\n\n");
+        sb.append("【任务类型】").append(resolveTaskFamily(state)).append("\n");
+
+        // 传递实体信息
+        List<String> entities = extractEntities(state);
+        if (entities != null && !entities.isEmpty()) {
+            sb.append("【提取的实体】").append(String.join("、", entities)).append("\n");
+            sb.append("【重要】该查询涉及多个实体，请为每个实体生成独立的检索任务！\n");
+        }
+        sb.append("\n");
+
         sb.append("【可用工具及能力说明】\n").append(TOOL_DESCRIPTIONS).append("\n\n");
         sb.append("【规划约束】\n").append(PLANNING_CONSTRAINTS).append("\n");
 
@@ -135,6 +147,16 @@ public class TaskDecompositionNode {
             return state.getRouterResult().getTaskFamily();
         }
         return "QA";
+    }
+
+    /**
+     * 从 RouterResult 中提取实体列表
+     */
+    private List<String> extractEntities(PlannerState state) {
+        if (state.getRouterResult() != null && state.getRouterResult().getEntities() != null) {
+            return state.getRouterResult().getEntities();
+        }
+        return null;
     }
 
     // ── 降级规则模板 ─────────────────────────────────────────────────────────

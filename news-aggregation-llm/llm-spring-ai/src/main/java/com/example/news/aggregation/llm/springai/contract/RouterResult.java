@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -49,6 +50,9 @@ public class RouterResult {
 
     /** 二级意图原因 */
     private String taskReason;
+
+    /** 提取的实体列表（国家/公司/人物/事件等） */
+    private List<String> entities;
 
     /**
      * 创建默认QA结果（兜底）
