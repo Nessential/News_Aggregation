@@ -55,7 +55,7 @@ public class SearchNewsExecutor implements CapabilityExecutor {
         context.addEvidence(results);
         log.info("[链路最终] 关键词检索完成FLOW|agent|node=search_news|step=end|sessionId={}|resultCount={}|next=证据汇总/后续节点",
                 sessionId, results.size());
-        return results;
+        return ToolOutputEnvelope.items(capabilityName(), results, "execution-plan/1.0");
     }
 
     /**

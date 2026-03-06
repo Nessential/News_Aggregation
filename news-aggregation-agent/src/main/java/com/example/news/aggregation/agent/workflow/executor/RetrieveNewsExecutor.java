@@ -63,9 +63,12 @@ public class RetrieveNewsExecutor implements CapabilityExecutor {
         }
 
         context.addEvidence(results);
-        log.info("[FLOW][retrieve-news] end|sessionId={} |mode={} |resultCount={} |next=evidence-merge",
+        log.info("[流程][检索新闻] 执行完成|sessionId={} |mode={} |resultCount={} |next=evidence-merge",
                 sessionId, mode, results.size());
-        return results;
+        Map<String, Object> output = ToolOutputEnvelope.items(capabilityName(), results, "execution-plan/1.0");
+        log.info("[流程][检索新闻] 输出已对象化|sessionId={} |capability={} |count={} |schemaVersion={}",
+                sessionId, capabilityName(), output.get("count"), output.get("schemaVersion"));
+        return output;
     }
 
     private Map<String, Object> extractFilters(Map<String, Object> parameters, WorkflowContext context) {

@@ -23,6 +23,8 @@ public class ExecutionPlan {
     private String parentPlanId;
     /** 本次重规划触发原因（非重规划场景可为空）。 */
     private String replanReasonCode;
+    /** Planner 追踪ID，用于串联 Planner -> Executor -> Replay 全链路。 */
+    private String plannerTraceId;
     private String goal;
     private String schemaVersion;
     private String semanticVersion;

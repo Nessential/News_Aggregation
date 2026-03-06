@@ -12,7 +12,10 @@ import com.example.news.aggregation.llm.springai.prompt.PromptRegistry;
  * 配置LLM调用所需的ChatClient
  */
 @Configuration
-@EnableConfigurationProperties(GraphProperties.class)
+@EnableConfigurationProperties({
+        GraphProperties.class,
+        PlannerResourceEstimationProperties.class
+})
 public class AiConfig {
     
     /**

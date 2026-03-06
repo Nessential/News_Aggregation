@@ -83,5 +83,6 @@ public class ExecutionReplayResponse {
         private Long eventCount;
         private String terminalState;
         private String timelineDigest;
+        private String plannerTraceId;
     }
 }

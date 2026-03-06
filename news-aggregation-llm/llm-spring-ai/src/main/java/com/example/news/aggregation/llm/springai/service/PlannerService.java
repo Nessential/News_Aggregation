@@ -11,12 +11,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
- * Planner服务
- * 封装PlannerGraph调用与计划校验
+ * Planner 服务：封装 PlannerGraph 调用、计划校验与元数据回填。
  */
 @Slf4j
 @Service
@@ -34,14 +35,10 @@ public class PlannerService {
     private String plannerSemanticVersion;
 
     /**
-     * 生成Plan
-     *
-     * @param request 计划请求
-     * @return 计划结果
+     * 生成执行计划。
      */
     public ExecutionPlan plan(PlanRequest request) {
         try {
-            // 配置关闭PlannerGraph时直接返回空计划
             if (!graphProperties.isPlannerEnabled()) {
                 return emptyExecutionPlan(request);
             }
@@ -58,18 +55,24 @@ public class PlannerService {
             ExecutionPlan plan = finalState.getExecutionPlan();
 
             if (!validator.validateExecutionPlan(plan)) {
-                log.warn("Plan validation failed, returning empty plan.");
+                log.warn("[规划服务] 计划结构校验失败，返回空计划兜底。");
                 return emptyExecutionPlan(request);
             }
 
-            return plan;
+            return enrichPlanMetadata(plan, request);
         } catch (Exception e) {
-            log.error("PlannerService plan failed.", e);
+            log.error("[规划服务] 计划生成异常，返回空计划兜底。", e);
             return emptyExecutionPlan(request);
         }
     }
 
     private ExecutionPlan emptyExecutionPlan(PlanRequest request) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("taskCount", 0);
+        metadata.put("plannerTraceId", resolvePlannerTraceId(request));
+        metadata.put("plannerMode", resolvePlannerMode(request));
+        metadata.put("toolBindingMode", resolveToolBindingMode(request));
+
         return ExecutionPlan.builder()
                 .planId("plan-empty")
                 .goal(request != null ? request.getQuery() : "")
@@ -79,7 +82,78 @@ public class PlannerService {
                         ? request.getSemanticVersion() : plannerSemanticVersion)
                 .steps(List.of())
                 .edges(List.of())
-                .metadata(Map.of("taskCount", 0))
+                .metadata(metadata)
                 .build();
+    }
+
+    /**
+     * 统一回填 planner 元数据，保证 trace、模式、工具绑定信息不丢失。
+     */
+    private ExecutionPlan enrichPlanMetadata(ExecutionPlan plan, PlanRequest request) {
+        if (plan == null) {
+            return emptyExecutionPlan(request);
+        }
+
+        Map<String, Object> metadata = new HashMap<>();
+        if (plan.getMetadata() != null) {
+            metadata.putAll(plan.getMetadata());
+        }
+
+        String plannerTraceId = resolvePlannerTraceId(request);
+        String plannerMode = resolvePlannerMode(request);
+        String toolBindingMode = resolveToolBindingMode(request);
+        metadata.put("plannerTraceId", plannerTraceId);
+        metadata.put("plannerMode", plannerMode);
+        metadata.put("toolBindingMode", toolBindingMode);
+        metadata.putIfAbsent("taskCount", plan.getSteps() == null ? 0 : plan.getSteps().size());
+
+        plan.setMetadata(metadata);
+
+        log.info("[规划服务] 计划元数据补齐完成|planId={} |plannerTraceId={} |plannerMode={} |toolBindingMode={} |stepCount= {}",
+                plan.getPlanId(),
+                plannerTraceId,
+                plannerMode,
+                toolBindingMode,
+                plan.getSteps() == null ? 0 : plan.getSteps().size());
+        return plan;
+    }
+
+    private String resolvePlannerTraceId(PlanRequest request) {
+        if (request != null && request.getContext() != null) {
+            Object trace = request.getContext().get("plannerTraceId");
+            if (trace != null) {
+                String candidate = String.valueOf(trace).trim();
+                if (!candidate.isBlank()) {
+                    return candidate;
+                }
+            }
+        }
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String resolvePlannerMode(PlanRequest request) {
+        if (request != null && request.getContext() != null) {
+            Object mode = request.getContext().get("plannerMode");
+            if (mode != null) {
+                String candidate = String.valueOf(mode).trim();
+                if (!candidate.isBlank()) {
+                    return candidate;
+                }
+            }
+        }
+        return "HYBRID";
+    }
+
+    private String resolveToolBindingMode(PlanRequest request) {
+        if (request != null && request.getContext() != null) {
+            Object mode = request.getContext().get("toolBindingMode");
+            if (mode != null) {
+                String candidate = String.valueOf(mode).trim().toLowerCase();
+                if (!candidate.isBlank()) {
+                    return candidate;
+                }
+            }
+        }
+        return "legacy";
     }
 }

@@ -36,6 +36,23 @@ app:
       schema-version: execution-plan/1.0
       semantic-version: 1.0.0
       decision-table-version: 1.0.0
+      resource-estimation:
+        type-time-map:
+          SEARCH: 2
+          RETRIEVE: 3
+          SUMMARIZE: 5
+          COMPARE: 7
+          ANALYZE: 10
+          TIMELINE: 8
+          DEEP_DIVE: 10
+        type-tools-map:
+          SEARCH: [search_news]
+          RETRIEVE: [retrieve_news, rerank_results]
+          SUMMARIZE: [llm_generate]
+          COMPARE: [llm_generate]
+          ANALYZE: [llm_generate]
+          TIMELINE: [llm_generate]
+          DEEP_DIVE: [llm_generate]
     # Graph执行配置
     graph:
       router-enabled: true

@@ -32,4 +32,8 @@ public class ExecutionEventLogRepository {
     public List<ExecutionEventLogEntity> listRecentByRunId(String runId, int limit) {
         return eventLogMapper.listRecentByRunId(runId, limit);
     }
+
+    public ExecutionEventLogEntity findLatestByRunIdAndEventType(String runId, String eventType) {
+        return eventLogMapper.findLatestByRunIdAndEventType(runId, eventType);
+    }
 }
