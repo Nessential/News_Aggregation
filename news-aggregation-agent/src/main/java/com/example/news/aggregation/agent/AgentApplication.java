@@ -2,12 +2,15 @@ package com.example.news.aggregation.agent;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import com.example.news.aggregation.llm.springai.decision.DecisionTable;
 
 /**
  * Agent 启动类。
  */
 @EnableScheduling
+@Import(DecisionTable.class)
 @SpringBootApplication(scanBasePackages = {
         "com.example.news.aggregation.agent",
         "com.example.news.aggregation.vector",

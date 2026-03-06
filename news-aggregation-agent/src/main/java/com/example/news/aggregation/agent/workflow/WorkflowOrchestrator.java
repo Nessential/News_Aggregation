@@ -6,6 +6,7 @@ import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchE
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
+import com.example.news.aggregation.agent.execution.enums.RunStatus;
 import com.example.news.aggregation.agent.execution.enums.StepStatus;
 import com.example.news.aggregation.agent.execution.model.ReplanChangeProof;
 import com.example.news.aggregation.agent.execution.model.ReplanEvidenceSnapshot;
@@ -125,7 +126,17 @@ public class WorkflowOrchestrator {
 
         if (!hasDependencies) {
             for (WorkflowStep step : normalizedSteps) {
+                if (isRunTerminal(runId)) {
+                    log.info("[workflow] run already terminal, stop flat-step dispatch|runId={} |nextStep={}",
+                            runId, step.getStepId());
+                    break;
+                }
                 executeStep(step, context, completed, failed, failFast);
+                if (isRunTerminal(runId)) {
+                    log.info("[workflow] run turned terminal, stop flat-step dispatch|runId={} |lastStep={}",
+                            runId, step.getStepId());
+                    break;
+                }
                 if (failFast && !failed.isEmpty()) {
                     break;
                 }
@@ -178,6 +189,7 @@ public class WorkflowOrchestrator {
                                          List<String> completed,
                                          List<String> failed,
                                          boolean failFast) {
+        String runId = context.getRunId();
         Map<String, WorkflowStep> stepMap = new HashMap<>();
         for (WorkflowStep step : steps) {
             stepMap.put(step.getStepId(), step);
@@ -185,6 +197,11 @@ public class WorkflowOrchestrator {
         boolean parallelizable = isParallelizable(workflow);
         int round = 0;
         while (completed.size() + failed.size() < stepMap.size()) {
+            if (isRunTerminal(runId)) {
+                log.info("[workflow] run already terminal, stop dependency scheduling|runId={} |completed={} |failed={}",
+                        runId, completed, failed);
+                break;
+            }
             round++;
             List<WorkflowStep> ready = findReadySteps(stepMap, completed, failed);
             if (ready.isEmpty()) {
@@ -209,6 +226,11 @@ public class WorkflowOrchestrator {
                 for (WorkflowStep step : ready) {
                     addUnique(failed, step.getStepId());
                 }
+                break;
+            }
+            if (isRunTerminal(runId)) {
+                log.info("[workflow] run turned terminal after scheduling round, stop dispatch|runId={} |round={}",
+                        runId, round);
                 break;
             }
             if (failFast && !failed.isEmpty()) {
@@ -240,8 +262,19 @@ public class WorkflowOrchestrator {
                                    List<String> completed,
                                    List<String> failed,
                                    boolean failFast) {
+        String runId = context.getRunId();
         for (WorkflowStep step : readySteps) {
+            if (isRunTerminal(runId)) {
+                log.info("[workflow] run already terminal, skip remaining ready steps|runId={} |stepId={}",
+                        runId, step.getStepId());
+                break;
+            }
             executeStep(step, context, completed, failed, failFast);
+            if (isRunTerminal(runId)) {
+                log.info("[workflow] run turned terminal, stop sequential dispatch|runId={} |stepId={}",
+                        runId, step.getStepId());
+                break;
+            }
             if (failFast && !failed.isEmpty()) {
                 break;
             }
@@ -256,9 +289,28 @@ public class WorkflowOrchestrator {
         String runId = context.getRunId();
         String stepId = step.getStepId();
 
+        if (isRunTerminal(runId)) {
+            log.info("[workflow] skip step because run is terminal|runId={} |stepId={}", runId, stepId);
+            return;
+        }
+
         if (!stepClaimService.claimStepCas(runId, stepId)) {
             // Step claim failed: treat as unclaimed to keep flow idempotent and observable.
             handleUnclaimedStep(runId, stepId, context, completed, failed);
+            return;
+        }
+
+        if (isRunTerminal(runId)) {
+            // Step may be claimed while another branch has already terminated the run.
+            stepClaimService.markTerminal(
+                    runId,
+                    stepId,
+                    StepStatus.SKIPPED.name(),
+                    "run_terminal_skip",
+                    "RUN_TERMINAL",
+                    "skip claimed step because run already terminal"
+            );
+            log.info("[workflow] claimed step skipped because run is terminal|runId={} |stepId={}", runId, stepId);
             return;
         }
 
@@ -283,6 +335,19 @@ public class WorkflowOrchestrator {
 
         WorkflowStep runtimeStep = copyStep(step);
         runtimeStep.setCapabilityName(selection.getSelectedTool());
+        if (isRunTerminal(runId)) {
+            stepClaimService.markTerminal(
+                    runId,
+                    stepId,
+                    StepStatus.SKIPPED.name(),
+                    "run_terminal_skip",
+                    "RUN_TERMINAL",
+                    "skip selected step because run already terminal"
+            );
+            log.info("[workflow] selected step skipped because run is terminal|runId={} |stepId={} |tool={}",
+                    runId, stepId, selection.getSelectedTool());
+            return;
+        }
         executionRunService.markRunning(runId, stepId);
         applySelectionToContext(context, stepId, selection);
         context.putAttribute("workflow.runtime.step." + stepId, stepClaimService.buildStepRuntimeView(runId, stepId));
@@ -817,6 +882,15 @@ public class WorkflowOrchestrator {
         context.putAttribute("workflow.failedSteps", failed);
 
         String runId = context.getRunId();
+        ExecutionRunEntity currentRun = runId == null || runId.isBlank() ? null : executionRunService.findByRunId(runId);
+        String persistedStatus = currentRun == null ? null : currentRun.getStatus();
+        if (isTerminalRunStatus(persistedStatus)) {
+            context.putAttribute("workflow.status", mapRunStatusToWorkflowStatus(persistedStatus));
+            log.info("[workflow] workflow finished by persisted terminal status|runId={} |status={} |completed={} |failed={}",
+                    runId, persistedStatus, completed, failed);
+            return;
+        }
+
         if (Boolean.TRUE.equals(context.getAttributes().get("workflow.waiting"))) {
             context.putAttribute("workflow.status", "WAITING");
             executionRunService.markWaiting(
@@ -1432,6 +1506,40 @@ public class WorkflowOrchestrator {
         }
         Object value = workflow.getMetadata().get("failFast");
         return value instanceof Boolean bool && bool;
+    }
+
+    private boolean isRunTerminal(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return false;
+        }
+        ExecutionRunEntity run = executionRunService.findByRunId(runId);
+        if (run == null) {
+            return false;
+        }
+        return isTerminalRunStatus(run.getStatus());
+    }
+
+    private boolean isTerminalRunStatus(String status) {
+        return RunStatus.ABORTED.name().equals(status)
+                || RunStatus.FAILED.name().equals(status)
+                || RunStatus.SUCCEEDED.name().equals(status)
+                || RunStatus.WAITING.name().equals(status);
+    }
+
+    private String mapRunStatusToWorkflowStatus(String runStatus) {
+        if (RunStatus.SUCCEEDED.name().equals(runStatus)) {
+            return "SUCCESS";
+        }
+        if (RunStatus.WAITING.name().equals(runStatus)) {
+            return "WAITING";
+        }
+        if (RunStatus.ABORTED.name().equals(runStatus)) {
+            return "ABORTED";
+        }
+        if (RunStatus.FAILED.name().equals(runStatus)) {
+            return "FAILED";
+        }
+        return "FAILED";
     }
 
     private Object executeCapability(String capabilityName, Map<String, Object> parameters, WorkflowContext context) {
