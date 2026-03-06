@@ -3,11 +3,13 @@ package com.example.news.aggregation.agent.execution.service;
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
+import com.example.news.aggregation.agent.workflow.ExecutionPlanWorkflowAdapter;
 import com.example.news.aggregation.agent.workflow.WorkflowContext;
 import com.example.news.aggregation.agent.workflow.WorkflowDefinition;
 import com.example.news.aggregation.agent.workflow.WorkflowOrchestrator;
 import com.example.news.aggregation.agent.workflow.WorkflowStep;
 import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.FailurePolicy;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,10 +32,22 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ExecutionDispatchService {
 
+    private static final Map<String, List<String>> TYPE_TOOL_MAP = Map.of(
+            "SEARCH", List.of("search_news"),
+            "RETRIEVE", List.of("retrieve_news"),
+            "QA", List.of("llm_generate"),
+            "SUMMARIZE", List.of("llm_generate"),
+            "COMPARE", List.of("llm_generate"),
+            "ANALYZE", List.of("llm_generate"),
+            "TIMELINE", List.of("llm_generate"),
+            "DEEP_DIVE", List.of("llm_generate")
+    );
+
     private final ExecutionRunService executionRunService;
     private final StepClaimService stepClaimService;
     private final WorkflowOrchestrator workflowOrchestrator;
     private final ExecutionPersistenceProperties executionPersistenceProperties;
+    private final ExecutionPlanWorkflowAdapter executionPlanWorkflowAdapter;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -78,6 +92,55 @@ public class ExecutionDispatchService {
             log.error("[execution-dispatch] 续跑派发失败|runId={} |triggerStepId={}", runId, triggerStepId, e);
             return false;
         }
+    }
+
+    /**
+     * 将 Replan 生成的新计划应用到已有 run。
+     * 步骤：
+     * 1. 计算新计划版本（当前版本 + 1）；
+     * 2. 调用 switchActivePlanVersionAndIncreaseReplanCount 将旧版 PENDING 步骤标为已废弃；
+     * 3. 将新计划步骤写入 ExecutionStepRun；
+     * 4. 重新派发 run 继续执行。
+     */
+    public boolean applyNewPlan(String runId, ExecutionPlan newPlan) {
+        if (runId == null || runId.isBlank() || newPlan == null
+                || newPlan.getSteps() == null || newPlan.getSteps().isEmpty()) {
+            log.warn("[execution-dispatch] applyNewPlan 参数无效|runId={}", runId);
+            return false;
+        }
+
+        ExecutionRunEntity run = executionRunService.findByRunId(runId);
+        if (run == null) {
+            log.warn("[execution-dispatch] applyNewPlan 找不到 run|runId={}", runId);
+            return false;
+        }
+
+        int currentVersion = run.getActivePlanVersion() == null ? 1 : run.getActivePlanVersion();
+        int newVersion = currentVersion + 1;
+
+        boolean switched = executionRunService.switchActivePlanVersionAndIncreaseReplanCount(runId, newVersion);
+        if (!switched) {
+            log.warn("[execution-dispatch] applyNewPlan 版本切换失败（CAS 冲突）|runId={} |newVersion={}", runId, newVersion);
+            return false;
+        }
+
+        WorkflowDefinition workflow = executionPlanWorkflowAdapter.toWorkflowDefinition(newPlan, TYPE_TOOL_MAP);
+        List<WorkflowStep> steps = workflow.getSteps();
+        if (steps == null || steps.isEmpty()) {
+            log.warn("[execution-dispatch] applyNewPlan 新计划转换后步骤为空|runId={}", runId);
+            return false;
+        }
+
+        stepClaimService.prepareStepRuns(
+                runId,
+                steps,
+                executionPersistenceProperties.getRecovery().getMaxRecoveryAttempts(),
+                executionPersistenceProperties.getRecovery().getMaxRecoveryAttempts(),
+                newVersion
+        );
+
+        log.info("[execution-dispatch] 新计划已写入|runId={} |newVersion={} |stepCount={}", runId, newVersion, steps.size());
+        return dispatchRun(runId, null, null);
     }
 
     private WorkflowDefinition rebuildWorkflow(ExecutionRunEntity run,

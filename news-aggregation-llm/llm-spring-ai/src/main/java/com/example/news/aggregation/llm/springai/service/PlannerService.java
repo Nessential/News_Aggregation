@@ -49,6 +49,10 @@ public class PlannerService {
                     .context(request.getContext())
                     .semanticVersion(request.getSemanticVersion() != null
                             ? request.getSemanticVersion() : plannerSemanticVersion)
+                    // Replan 上下文：由 ExecutionRecoveryService 填充，首次规划时均为 null/false
+                    .isReplan(Boolean.TRUE.equals(request.getIsReplan()))
+                    .replanReason(request.getReplanReason())
+                    .stepResults(request.getStepResults())
                     .build();
 
             PlannerState finalState = plannerGraph.invoke(state);
