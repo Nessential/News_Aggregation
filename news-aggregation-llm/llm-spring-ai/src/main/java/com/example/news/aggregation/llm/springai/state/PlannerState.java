@@ -47,9 +47,40 @@ public class PlannerState {
     /** 错误信息 */
     private String error;
 
+    /** 是否由 Replan 触发（控制 TaskDecompositionNode 是否注入失败上下文到 prompt） */
+    private boolean isReplan;
+
+    /** 触发 Replan 的原因（写入 LLM prompt，让 LLM 据此修正计划） */
+    private String replanReason;
+
+    /** 已完成步骤的执行结果摘要（stepId -> 结果），Replan 时注入 LLM prompt */
+    private Map<String, StepExecutionResult> stepResults;
+
     /** 步数+1 */
     public void incrementStep() {
         this.stepCount++;
+    }
+
+    /**
+     * 步骤执行结果摘要（精简，避免 token 爆炸）
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StepExecutionResult {
+        /** 步骤 ID */
+        private String stepId;
+        /** 执行状态：SUCCESS / FAILED */
+        private String status;
+        /** 实际使用的工具名 */
+        private String toolUsed;
+        /** 输出精简摘要（如"找到 8 篇文章"），不传完整数据 */
+        private String outputSummary;
+        /** 失败原因（status=FAILED 时填写） */
+        private String failureReason;
+        /** 检索到的证据数量 */
+        private int evidenceCount;
     }
 
     /**

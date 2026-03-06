@@ -1,5 +1,6 @@
 package com.example.news.aggregation.agent.execution.service;
 
+import com.example.news.aggregation.agent.client.PlannerClient;
 import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceProperties;
 import com.example.news.aggregation.agent.execution.config.ReplanControlProperties;
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
@@ -7,16 +8,23 @@ import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
 import com.example.news.aggregation.llm.springai.contract.ExecutionEnums;
+import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
+import com.example.news.aggregation.llm.springai.contract.PlanRequest;
 import com.example.news.aggregation.llm.springai.decision.DecisionResult;
 import com.example.news.aggregation.llm.springai.decision.DecisionTable;
 import com.example.news.aggregation.llm.springai.decision.FailureContext;
+import com.example.news.aggregation.llm.springai.state.PlannerState;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 恢复 worker：扫描过期 RUNNING 步骤并执行安全恢复动作。
@@ -34,6 +42,9 @@ public class ExecutionRecoveryService {
     private final ExecutionDispatchService executionDispatchService;
     private final DecisionTable decisionTable;
     private final ReplanControlProperties replanControlProperties;
+    private final PlannerClient plannerClient;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Scheduled(fixedDelayString = "${app.agent.execution.recovery.scan-interval-ms:15000}")
     public void recoverExpiredSteps() {
@@ -75,18 +86,21 @@ public class ExecutionRecoveryService {
 
             if (action == RecoveryAction.REPLAN) {
                 String finalReason = persistReplanAttempt(step, "replan_required");
-                stepClaimService.markFailed(
-                        step.getRunId(),
-                        step.getStepId(),
-                        finalReason,
-                        "REPLAN_REQUIRED",
-                        "quality failure requires replan"
-                );
-                executionRunService.markFailed(
-                        step.getRunId(),
-                        "REPLAN_REQUIRED",
-                        "quality failure requires replan"
-                );
+                boolean replanSucceeded = triggerReplan(step, finalReason);
+                if (!replanSucceeded) {
+                    stepClaimService.markFailed(
+                            step.getRunId(),
+                            step.getStepId(),
+                            finalReason,
+                            "REPLAN_FAILED",
+                            "replan triggered but planner returned empty plan"
+                    );
+                    executionRunService.markFailed(
+                            step.getRunId(),
+                            "REPLAN_FAILED",
+                            "replan triggered but planner returned empty plan"
+                    );
+                }
                 continue;
             }
 
@@ -480,6 +494,115 @@ public class ExecutionRecoveryService {
                 return false;
             }
         }
+    }
+
+    /**
+     * 触发真实的 Replan：收集执行上下文 → 调用 Planner → 应用新计划。
+     *
+     * @return true 表示成功触发并应用了新计划，false 表示 Planner 返回空计划或调用失败
+     */
+    private boolean triggerReplan(ExecutionStepRunEntity step, String replanReason) {
+        String runId = step.getRunId();
+        try {
+            Map<String, PlannerState.StepExecutionResult> stepResults = collectStepResults(runId);
+            String originalQuery = resolveOriginalQuery(runId, stepResults);
+
+            PlanRequest replanRequest = PlanRequest.builder()
+                    .query(originalQuery)
+                    .isReplan(true)
+                    .replanReason(replanReason)
+                    .stepResults(stepResults)
+                    .build();
+
+            log.info("[execution-recovery] 触发 Replan|runId={} |stepId={} |reason={} |completedSteps={}",
+                    runId, step.getStepId(), replanReason, stepResults.size());
+
+            ExecutionPlan newPlan = plannerClient.plan(replanRequest);
+
+            if (newPlan == null || newPlan.getSteps() == null || newPlan.getSteps().isEmpty()) {
+                log.warn("[execution-recovery] Planner 返回空计划|runId={}", runId);
+                return false;
+            }
+
+            boolean applied = executionDispatchService.applyNewPlan(runId, newPlan);
+            if (applied) {
+                log.info("[execution-recovery] Replan 成功，新计划已应用|runId={} |newStepCount={}",
+                        runId, newPlan.getSteps().size());
+            } else {
+                log.warn("[execution-recovery] 新计划应用失败|runId={}", runId);
+            }
+            return applied;
+
+        } catch (Exception e) {
+            log.error("[execution-recovery] Replan 触发异常|runId={} |error={}", runId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 收集当前 run 所有步骤的执行摘要（精简，不传完整数据，避免 token 爆炸）。
+     */
+    private Map<String, PlannerState.StepExecutionResult> collectStepResults(String runId) {
+        List<ExecutionStepRunEntity> stepRuns = stepClaimService.listByRunId(runId);
+        Map<String, PlannerState.StepExecutionResult> results = new HashMap<>();
+        if (stepRuns == null) return results;
+
+        for (ExecutionStepRunEntity s : stepRuns) {
+            if (s == null || s.getStepId() == null) continue;
+            String status = "RUNNING".equals(s.getStatus()) || "PENDING".equals(s.getStatus())
+                    ? "FAILED" : s.getStatus();
+
+            results.put(s.getStepId(), PlannerState.StepExecutionResult.builder()
+                    .stepId(s.getStepId())
+                    .status(status)
+                    .toolUsed(s.getSelectedTool())
+                    .failureReason(s.getLastReplanReasonCode())
+                    .evidenceCount(extractEvidenceCount(s.getEvidenceSnapshot()))
+                    .outputSummary(buildOutputSummary(s))
+                    .build());
+        }
+        return results;
+    }
+
+    /**
+     * 从步骤输入参数中还原原始 query。
+     * 优先从第一个步骤的 inputJson 取 query 字段，取不到则返回空字符串。
+     */
+    private String resolveOriginalQuery(String runId,
+                                        Map<String, PlannerState.StepExecutionResult> stepResults) {
+        List<ExecutionStepRunEntity> stepRuns = stepClaimService.listByRunId(runId);
+        if (stepRuns == null || stepRuns.isEmpty()) return "";
+        for (ExecutionStepRunEntity s : stepRuns) {
+            if (s == null || s.getInputJson() == null) continue;
+            try {
+                Map<String, Object> input = objectMapper.readValue(
+                        s.getInputJson(), new TypeReference<Map<String, Object>>() {});
+                Object q = input.get("query");
+                if (q != null && !String.valueOf(q).isBlank()) {
+                    return String.valueOf(q);
+                }
+            } catch (Exception ignore) {
+            }
+        }
+        return "";
+    }
+
+    private int extractEvidenceCount(String evidenceSnapshot) {
+        if (evidenceSnapshot == null || evidenceSnapshot.isBlank()) return 0;
+        try {
+            List<?> list = objectMapper.readValue(evidenceSnapshot, List.class);
+            return list.size();
+        } catch (Exception ignore) {
+            return 0;
+        }
+    }
+
+    private String buildOutputSummary(ExecutionStepRunEntity s) {
+        if ("SUCCESS".equals(s.getStatus())) {
+            int count = extractEvidenceCount(s.getEvidenceSnapshot());
+            return count > 0 ? "找到 " + count + " 条证据" : "执行成功";
+        }
+        return s.getLastReplanReasonCode() != null ? "失败: " + s.getLastReplanReasonCode() : "执行失败";
     }
 
     /**
