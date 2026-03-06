@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 8084
 
 spring:
@@ -81,8 +81,6 @@ app:
     tool:
       binding:
         mode: spring_tool
-    graph:
-      template-first: true
 
     replan:
       enabled: true

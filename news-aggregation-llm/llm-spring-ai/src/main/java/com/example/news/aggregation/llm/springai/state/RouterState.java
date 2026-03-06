@@ -67,6 +67,9 @@ public class RouterState {
     /** 二级意图原因 */
     private String taskReason;
 
+    /** 提取的实体列表 */
+    private List<String> entities;
+
     /** 执行步数 */
     private int stepCount;
 
@@ -92,6 +95,7 @@ public class RouterState {
                 .intentReason(intentReason)
                 .taskConfidence(taskConfidence)
                 .taskReason(taskReason)
+                .entities(entities)
                 .build();
     }
 }

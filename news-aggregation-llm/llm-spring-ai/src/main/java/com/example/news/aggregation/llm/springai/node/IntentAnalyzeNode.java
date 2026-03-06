@@ -126,6 +126,18 @@ public class IntentAnalyzeNode {
             double confidence = root.path("confidence").asDouble(0.0);
             String reason = root.path("reason").asText("");
             String language = root.path("language").asText("").trim();
+            JsonNode entitiesNode = root.path("entities");
+            if (entitiesNode.isArray()) {
+                java.util.List<String> entitiesList = new java.util.ArrayList<>();
+                for (JsonNode entity : entitiesNode) {
+                    String e = entity.asText("");
+                    if (!e.isBlank()) {
+                        entitiesList.add(e.trim());
+                    }
+                }
+                state.setEntities(entitiesList);
+                log.info("意图识别-提取实体|entities={}", entitiesList);
+            }
 
             if (intentScope.isBlank()) {
                 setDefaultNewsRoute(state, "missing_intent_scope");

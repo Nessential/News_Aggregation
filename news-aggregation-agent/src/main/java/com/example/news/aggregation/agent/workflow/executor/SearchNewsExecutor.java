@@ -52,6 +52,7 @@ public class SearchNewsExecutor implements CapabilityExecutor {
         String sessionId = context != null ? context.getSessionId() : "unknown";
         log.info("[链路最终] 开始关键词检索FLOW|agent|node=search_news|step=start|sessionId={}|topK={}|query={}|reason=任务规划/默认检索|next=检索服务", sessionId, topK, truncate(query, 200));
         List<RetrievalResult> results = retrievalClient.keywordSearch(query, topK, filters);
+//        证据组装
         context.addEvidence(results);
         log.info("[链路最终] 关键词检索完成FLOW|agent|node=search_news|step=end|sessionId={}|resultCount={}|next=证据汇总/后续节点",
                 sessionId, results.size());

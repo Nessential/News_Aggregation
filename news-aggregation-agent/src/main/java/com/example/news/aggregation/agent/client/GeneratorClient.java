@@ -31,6 +31,7 @@ public class GeneratorClient {
     public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
         // TODO 改为 RPC 调用
         String url = llmBaseUrl + "/api/graph/generate";
+//        调用大模型得到结果
         GeneratorRequest request = GeneratorRequest.builder()
                 .query(query)
                 .taskFamily(taskFamily)

@@ -219,13 +219,12 @@ public class LLMOrchestrator {
         } else {
             PlannerIntegrationProperties.PlannerMode plannerMode = plannerIntegrationProperties.resolvePlannerMode();
             boolean usePlanner = shouldUsePlanner(taskFamily, directAnswer, plannerMode);
-            log.info("[编排][规划] 规划策略决策|sessionId={} |turnId={} |taskFamily={} |directAnswer={} |plannerMode={} |templateFirst={} |usePlanner={}",
+            log.info("[编排][规划] 规划策略决策|sessionId={} |turnId={} |taskFamily={} |directAnswer={} |plannerMode={} |usePlanner={}",
                     sessionId,
                     turnId,
                     taskFamily,
                     directAnswer,
                     plannerMode,
-                    plannerIntegrationProperties.isTemplateFirstEnabled(),
                     usePlanner);
             if (usePlanner) {
                 if (currentFsmState != ConversationState.PLAN) {
@@ -402,10 +401,7 @@ public class LLMOrchestrator {
     }
 
     /**
-     * Planner 薄化策略：
-     * 1. LEGACY：保持历史行为，仅复杂任务触发规划；
-     * 2. HYBRID：默认模板优先（template-first=true 时仅复杂任务规划）；
-     * 3. SAA_GRAPH：除直答外尽量走规划路径。
+     * Planner 策略：所有非直答任务都走 Planner 规划。
      */
     private boolean shouldUsePlanner(TaskFamily taskFamily,
                                      boolean directAnswer,
@@ -413,15 +409,7 @@ public class LLMOrchestrator {
         if (directAnswer) {
             return false;
         }
-        boolean complexTask = requiresPlanner(taskFamily);
-        PlannerIntegrationProperties.PlannerMode effectiveMode = plannerMode == null
-                ? PlannerIntegrationProperties.PlannerMode.HYBRID
-                : plannerMode;
-        return switch (effectiveMode) {
-            case LEGACY -> complexTask;
-            case SAA_GRAPH -> true;
-            case HYBRID -> plannerIntegrationProperties.isTemplateFirstEnabled() ? complexTask : true;
-        };
+        return true;
     }
 
     /**
@@ -434,7 +422,6 @@ public class LLMOrchestrator {
                                                     PlannerIntegrationProperties.PlannerMode plannerMode) {
         Map<String, Object> context = new HashMap<>();
         context.put("plannerMode", plannerMode == null ? "HYBRID" : plannerMode.name());
-        context.put("templateFirst", plannerIntegrationProperties.isTemplateFirstEnabled());
         context.put("toolBindingMode", plannerIntegrationProperties.resolveToolBindingMode());
         context.put("sessionId", sessionId);
         context.put("turnId", turnId);
@@ -483,10 +470,6 @@ public class LLMOrchestrator {
                 acquireResult.run().getRunId(),
                 plannerTraceId,
                 plannerMode == null ? "HYBRID" : plannerMode.name());
-    }
-
-    private boolean requiresPlanner(TaskFamily taskFamily) {
-        return taskFamily == TaskFamily.COMPARE || taskFamily == TaskFamily.DEEP_DIVE;
     }
 
     private String resolveWorkflowId(TaskFamily taskFamily) {
