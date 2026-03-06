@@ -20,6 +20,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Run 聚合服务：负责 run 创建/回放、状态迁移、计划版本切换等持久化行为。
@@ -30,6 +32,8 @@ import java.util.UUID;
 public class ExecutionRunService {
 
     private static final String DEFAULT_TENANT_ID = "default";
+    private static final String PLANNER_TRACE_EVENT_TYPE = "RUN_PLANNER_TRACE_BOUND";
+    private static final Pattern PLANNER_TRACE_PATTERN = Pattern.compile("\\\"plannerTraceId\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
 
     private final ExecutionRunRepository runRepository;
     private final ExecutionStepRunRepository stepRunRepository;
@@ -74,7 +78,7 @@ public class ExecutionRunService {
         ExecutionRunEntity existing = runRepository.findByRequestDedupeKey(requestDedupeKey);
         if (existing != null) {
             validatePlanHashOrThrow(existing, planHash);
-            log.info("[execution-run] dedupe hit, replay existing run|runId={} |status={} |requestKey={}",
+            log.info("[执行运行] 命中幂等复用|runId={} |status={} |requestKey={}",
                     existing.getRunId(), existing.getStatus(), requestDedupeKey);
             return new RunAcquireResult(existing, true);
         }
@@ -111,7 +115,7 @@ public class ExecutionRunService {
                 throw duplicateKeyException;
             }
             validatePlanHashOrThrow(conflict, planHash);
-            log.warn("[execution-run] concurrent run creation conflict, replay existing run|runId={} |requestKey={}",
+            log.warn("[执行运行] 并发创建冲突，回放已存在 run|runId={} |requestKey={}",
                     conflict.getRunId(), requestDedupeKey);
             return new RunAcquireResult(conflict, true);
         }
@@ -143,7 +147,7 @@ public class ExecutionRunService {
     }
 
     /**
-     * 构建 run 级回放快照，聚合 run、step_run、event_log 三类持久化数据。
+     * 构建 run 级回放快照，聚合 run、step_run、event_log 三类事实源。
      */
     public ExecutionReplaySnapshot buildReplaySnapshot(String runId) {
         return buildReplaySnapshot(runId, null);
@@ -151,9 +155,6 @@ public class ExecutionRunService {
 
     /**
      * 构建 run 级回放快照，可指定“最近 N 条事件窗口”。
-     * 说明：
-     * 1. eventLimit 为空或 <=0 时，返回全量事件；
-     * 2. eventLimit >0 时，按 id 倒序截取最近 N 条后再按升序输出，保证时间线可读。
      */
     public ExecutionReplaySnapshot buildReplaySnapshot(String runId, Integer eventLimit) {
         if (runId == null || runId.isBlank()) {
@@ -163,16 +164,20 @@ public class ExecutionRunService {
         if (run == null) {
             return null;
         }
+
         List<ExecutionEventLogEntity> events;
         if (eventLimit != null && eventLimit > 0) {
             events = eventLogRepository.listRecentByRunId(runId, eventLimit);
         } else {
             events = eventLogRepository.listByRunId(runId);
         }
+
         List<ExecutionStepRunEntity> stepRuns = stepRunRepository.findByRunId(runId);
         long eventCount = eventLogRepository.countByRunId(runId);
         int stepCount = stepRuns == null ? 0 : stepRuns.size();
         String timelineDigest = buildTimelineDigest(events, eventCount);
+        String plannerTraceId = resolvePlannerTraceId(runId, events);
+
         ExecutionReplaySnapshot snapshot = ExecutionReplaySnapshot.builder()
                 .run(run)
                 .stepRuns(stepRuns)
@@ -182,9 +187,11 @@ public class ExecutionRunService {
                 .eventCount(eventCount)
                 .terminalState(run.getStatus())
                 .timelineDigest(timelineDigest)
+                .plannerTraceId(plannerTraceId)
                 .build();
-        log.info("[execution-run] 已生成运行回放快照|runId={} |stepCount={} |eventCount={} |eventWindow={} |timelineDigest={}",
-                runId, stepCount, eventCount, eventLimit, timelineDigest);
+
+        log.info("[执行运行] 运行回放快照已生成|runId={} |stepCount={} |eventCount={} |eventWindow={} |timelineDigest={} |plannerTraceId={}",
+                runId, stepCount, eventCount, eventLimit, timelineDigest, plannerTraceId);
         return snapshot;
     }
 
@@ -209,8 +216,7 @@ public class ExecutionRunService {
     }
 
     /**
-     * 仅在“新计划已写入且需要激活”的场景调用。
-     * 方法职责：在 CAS 语义下切换 active_plan_version，并在切换成功后扣减 run 级 replan 预算。
+     * 在 CAS 语义下切换 active_plan_version，并在成功后扣减 run 级 replan 预算。
      */
     public boolean switchActivePlanVersionAndIncreaseReplanCount(String runId, int activePlanVersion) {
         int target = Math.max(1, activePlanVersion);
@@ -245,7 +251,7 @@ public class ExecutionRunService {
                             "supersede pending steps from old plan versions",
                             "{\"activePlanVersion\":" + target + ",\"supersededCount\":" + supersededSteps + "}"
                     );
-                    log.info("[execution-run] 计划切换后已收敛旧计划未开始步骤|runId={} |activePlanVersion={} |supersededCount={}",
+                    log.info("[执行运行] 计划切换后已收敛旧计划未开始步骤|runId={} |activePlanVersion={} |supersededCount={}",
                             runId, target, supersededSteps);
                 }
                 return true;
@@ -328,7 +334,7 @@ public class ExecutionRunService {
         if (events == null || events.isEmpty()) {
             return "无事件";
         }
-        java.util.List<String> nodes = events.stream()
+        List<String> nodes = events.stream()
                 .filter(Objects::nonNull)
                 .map(item -> {
                     String eventType = item.getEventType() == null || item.getEventType().isBlank()
@@ -346,5 +352,53 @@ public class ExecutionRunService {
             return "... -> " + digest;
         }
         return digest;
+    }
+
+    /**
+     * plannerTraceId 优先从当前事件窗口提取，未命中时回退到全量事件中的最新绑定事件。
+     */
+    private String resolvePlannerTraceId(String runId, List<ExecutionEventLogEntity> events) {
+        String fromWindow = extractPlannerTraceIdFromEvents(events);
+        if (fromWindow != null && !fromWindow.isBlank()) {
+            return fromWindow;
+        }
+
+        ExecutionEventLogEntity latestPlannerTrace = eventLogRepository.findLatestByRunIdAndEventType(
+                runId,
+                PLANNER_TRACE_EVENT_TYPE
+        );
+        if (latestPlannerTrace == null) {
+            return null;
+        }
+        return extractPlannerTraceId(latestPlannerTrace.getPayloadJson());
+    }
+
+    private String extractPlannerTraceIdFromEvents(List<ExecutionEventLogEntity> events) {
+        if (events == null || events.isEmpty()) {
+            return null;
+        }
+        for (int i = events.size() - 1; i >= 0; i--) {
+            ExecutionEventLogEntity event = events.get(i);
+            if (event == null || !PLANNER_TRACE_EVENT_TYPE.equals(event.getEventType())) {
+                continue;
+            }
+            String traceId = extractPlannerTraceId(event.getPayloadJson());
+            if (traceId != null && !traceId.isBlank()) {
+                return traceId;
+            }
+        }
+        return null;
+    }
+
+    private String extractPlannerTraceId(String payloadJson) {
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return null;
+        }
+        Matcher matcher = PLANNER_TRACE_PATTERN.matcher(payloadJson);
+        if (!matcher.find()) {
+            return null;
+        }
+        String traceId = matcher.group(1);
+        return traceId == null ? null : traceId.trim();
     }
 }

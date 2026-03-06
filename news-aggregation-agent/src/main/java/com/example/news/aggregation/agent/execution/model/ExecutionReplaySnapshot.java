@@ -26,4 +26,5 @@ public class ExecutionReplaySnapshot {
     private Long eventCount;
     private String terminalState;
     private String timelineDigest;
+    private String plannerTraceId;
 }

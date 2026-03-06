@@ -1,8 +1,8 @@
 package com.example.news.aggregation.llm.springai.tool;
 
-import com.alibaba.cloud.ai.mcp.McpTool;
 import com.example.news.aggregation.llm.springai.tool.dto.RetrievalResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,8 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * 重排序工具（使用MMR算法）
- * MVP阶段采用启发式MMR，后续可接入LLM重排服务。
+ * 重排工具（MMR）。
  */
 @Slf4j
 @Component
@@ -26,21 +25,15 @@ public class RerankTool {
     private double diversityWeight;
 
     /**
-     * MMR重排序（Maximal Marginal Relevance）
-     * 平衡相关性与多样性。
-     *
-     * @param results 原始检索结果
-     * @param topN    返回结果数量
-     * @param lambda  相关性权重(0.0-1.0, 1.0=纯相关, 0.0=纯多样)
-     * @return 重排序后的结果
+     * MMR 重排，平衡相关性与多样性。
      */
-    @McpTool(name = "rerank_results", description = "基于MMR的结果重排")
+    @Tool(name = "rerank_results", description = "基于 MMR 的结果重排")
     public List<RetrievalResult> mmrRerank(List<RetrievalResult> results, int topN, double lambda) {
         if (results == null || results.isEmpty()) {
             return Collections.emptyList();
         }
 
-        log.info("Executing MMR rerank: input_size={}, topN={}, lambda={}", results.size(), topN, lambda);
+        log.info("[工具][rerank_results] 开始执行|inputSize={} |topN={} |lambda={}", results.size(), topN, lambda);
 
         List<RetrievalResult> selected = new ArrayList<>();
         List<RetrievalResult> candidates = new ArrayList<>(results);
@@ -54,7 +47,6 @@ public class RerankTool {
 
             for (int i = 0; i < candidates.size(); i++) {
                 RetrievalResult candidate = candidates.get(i);
-
                 double relevanceScore = candidate.getScore();
 
                 double maxSimilarity = 0.0;
@@ -64,7 +56,6 @@ public class RerankTool {
                 }
 
                 double mmrScore = lambda * relevanceScore - (1 - lambda) * maxSimilarity;
-
                 if (mmrScore > maxMmrScore) {
                     maxMmrScore = mmrScore;
                     maxMmrIndex = i;
@@ -78,36 +69,24 @@ public class RerankTool {
             }
         }
 
-        log.info("MMR rerank completed: output_size={}", selected.size());
+        log.info("[工具][rerank_results] 执行完成|outputSize={}", selected.size());
         return selected;
     }
 
-    /**
-     * MMR重排序（使用默认topN与配置的lambda）
-     */
     public List<RetrievalResult> mmrRerank(List<RetrievalResult> results, int topN) {
         double lambda = 1.0 - diversityWeight;
         return mmrRerank(results, topN, lambda);
     }
 
-    /**
-     * MMR重排序（使用默认参数）
-     */
     public List<RetrievalResult> mmrRerank(List<RetrievalResult> results) {
         return mmrRerank(results, defaultTopN);
     }
 
-    /**
-     * 计算两个文档的相似度（简化实现）
-     *
-     * @return 相似度分数(0.0-1.0)
-     */
     private double calculateSimilarity(RetrievalResult doc1, RetrievalResult doc2) {
         double similarity = 0.0;
 
         String id1Prefix = doc1.getId().split("_")[0];
         String id2Prefix = doc2.getId().split("_")[0];
-
         if (id1Prefix.equals(id2Prefix)) {
             similarity += 0.3;
         }
@@ -124,11 +103,8 @@ public class RerankTool {
         return Math.min(similarity, 1.0);
     }
 
-    /**
-     * LLM重排序（后续可接入真实LLM）
-     */
     public List<RetrievalResult> llmRerank(String query, List<RetrievalResult> results, int topN) {
-        log.info("LLM rerank not implemented in MVP, falling back to MMR");
+        log.info("[工具][rerank_results] LLM 重排暂未启用，回退 MMR|query={}", query);
         return mmrRerank(results, topN);
     }
 }

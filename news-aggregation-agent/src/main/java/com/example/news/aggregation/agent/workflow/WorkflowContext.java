@@ -32,6 +32,9 @@ public class WorkflowContext {
     /** 是否恢复模式执行。 */
     private Boolean recoveryMode;
 
+    /** Planner 追踪ID。 */
+    private String plannerTraceId;
+
     /** 用户查询。 */
     private String query;
 

@@ -75,6 +75,15 @@ app:
     index-name: ${news.aggregation.elasticsearch.index-name}
 
   agent:
+    # SpringAI Alibaba 改造开关（A 阶段）
+    planner:
+      mode: hybrid
+    tool:
+      binding:
+        mode: spring_tool
+    graph:
+      template-first: true
+
     replan:
       enabled: true
       max-replans-per-run: 2

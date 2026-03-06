@@ -10,8 +10,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Map;
+
 /**
- * Planner 客户端 (HTTP)。
+ * Planner HTTP 客户端。
  */
 @Slf4j
 @Component
@@ -30,25 +32,39 @@ public class PlannerClient {
     private String executionSemanticVersion;
 
     /**
-     * 调用 Planner 生成计划。
+     * 调用 Planner 生成计划（兼容旧调用）。
      */
     public ExecutionPlan plan(String query, RouterResult routerResult) {
+        return plan(query, routerResult, null);
+    }
+
+    /**
+     * 调用 Planner 生成计划。
+     *
+     * @param query 用户问题
+     * @param routerResult 路由结果
+     * @param context 规划上下文（可选），用于透传 planner 模式、trace 等调试信息
+     * @return 结构化执行计划
+     */
+    public ExecutionPlan plan(String query, RouterResult routerResult, Map<String, Object> context) {
         String url = llmBaseUrl + "/api/graph/plan";
         PlanRequest request = PlanRequest.builder()
                 .query(query)
                 .routerResult(routerResult)
+                .context(context)
                 .planSchema(executionSchemaVersion)
                 .semanticVersion(executionSemanticVersion)
                 .build();
         try {
-            log.info("[client] 调用规划服务FLOW|agent|client=planner|step=start|url={}|next=LLM-Planner", url);
+            log.info("[客户端][规划] 开始调用规划服务|url={} |hasContext={}", url, context != null && !context.isEmpty());
             ResponseEntity<ExecutionPlan> response = restTemplate.postForEntity(url, request, ExecutionPlan.class);
             ExecutionPlan body = response.getBody();
             int taskCount = body != null && body.getSteps() != null ? body.getSteps().size() : 0;
-            log.info("[client] 规划返回FLOW|agent|client=planner|step=end|taskCount={}|next=执行计划", taskCount);
+            log.info("[客户端][规划] 规划服务返回成功|taskCount={} |planId={}",
+                    taskCount, body == null ? null : body.getPlanId());
             return body;
         } catch (Exception e) {
-            log.warn("PlannerClient plan failed, error={}", e.getMessage());
+            log.warn("[客户端][规划] 调用失败|error={}", e.getMessage());
             return null;
         }
     }

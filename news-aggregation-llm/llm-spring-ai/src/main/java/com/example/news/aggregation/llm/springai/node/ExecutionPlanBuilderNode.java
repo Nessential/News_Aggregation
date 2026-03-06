@@ -36,12 +36,13 @@ public class ExecutionPlanBuilderNode {
 
         List<PlannerState.SubTask> subTasks = state.getSubTasks();
         Map<String, List<String>> dependencies = state.getDependencies();
-        log.info("[planner] 进入执行计划构建：query={}, subTaskCount={}, hasDependencies={}",
+        log.info("[planner] 进入执行计划构建|query={} |subTaskCount={} |hasDependencies={}",
                 state.getQuery(),
                 subTasks == null ? 0 : subTasks.size(),
                 dependencies != null && !dependencies.isEmpty());
+
         if (subTasks == null || subTasks.isEmpty()) {
-            log.warn("[planner] 子任务为空，返回空执行计划：query={}", state.getQuery());
+            log.warn("[planner] 子任务为空，返回空执行计划|query={}", state.getQuery());
             state.setExecutionPlan(emptyPlan(state));
             return state;
         }
@@ -66,7 +67,7 @@ public class ExecutionPlanBuilderNode {
                     .stepId(subTask.getId())
                     .name(subTask.getDescription())
                     .type(subTask.getType())
-                    .tool(resolveTool(subTask))
+                    .tool(resolveTool(state, subTask))
                     .dependsOn(deps)
                     .input(subTask.getParameters())
                     .outputSchema(defaultOutputSchema(subTask.getType()))
@@ -91,8 +92,12 @@ public class ExecutionPlanBuilderNode {
         metadata.put("executionOrder", executionOrder);
         metadata.put("parallelizable", isParallelizable(dependencies));
 
+        String planId = "plan-" + UUID.randomUUID().toString().replace("-", "");
+        String traceId = "trace-" + UUID.randomUUID().toString().replace("-", "");
+
         ExecutionPlan plan = ExecutionPlan.builder()
-                .planId("plan-" + UUID.randomUUID().toString().replace("-", ""))
+                .planId(planId)
+                .plannerTraceId(traceId)
                 .goal(state.getQuery())
                 .schemaVersion("execution-plan/1.0")
                 .semanticVersion(state.getSemanticVersion() != null ? state.getSemanticVersion() : "1.0.0")
@@ -107,8 +112,8 @@ public class ExecutionPlanBuilderNode {
                 .metadata(metadata)
                 .build();
 
-        log.info("[planner] 执行计划构建完成：planId={}, stepCount={}, edgeCount={}, executionOrder={}",
-                plan.getPlanId(), steps.size(), edges.size(), executionOrder);
+        log.info("[planner] 执行计划构建完成|planId={} |traceId={} |stepCount={} |edgeCount={} |executionOrder={}",
+                plan.getPlanId(), plan.getPlannerTraceId(), steps.size(), edges.size(), executionOrder);
         state.setExecutionPlan(plan);
         return state;
     }
@@ -131,19 +136,63 @@ public class ExecutionPlanBuilderNode {
                 .build();
     }
 
-    private String resolveTool(PlannerState.SubTask subTask) {
+    private String resolveTool(PlannerState state, PlannerState.SubTask subTask) {
+        String bindingMode = resolveToolBindingMode(state);
+        boolean springToolMode = "spring_tool".equalsIgnoreCase(bindingMode);
+
         if (subTask.getRequiredTools() != null && !subTask.getRequiredTools().isEmpty()) {
-            log.debug("[planner] 使用预估工具：taskId={}, tool={}", subTask.getId(), subTask.getRequiredTools().get(0));
-            return subTask.getRequiredTools().get(0);
+            String requiredTool = subTask.getRequiredTools().get(0);
+            String selected = applyBindingModeToolAlias(state, subTask, requiredTool, springToolMode);
+            log.debug("[planner] 使用预估工具|taskId={} |bindingMode={} |tool={}",
+                    subTask.getId(), bindingMode, selected);
+            return selected;
         }
+
         String resolved = switch (subTask.getType()) {
             case "SEARCH" -> "search_news";
             case "RETRIEVE" -> "retrieve_news";
             default -> "llm_generate";
         };
-        log.debug("[planner] 使用默认工具映射：taskId={}, taskType={}, tool={}",
-                subTask.getId(), subTask.getType(), resolved);
+        resolved = applyBindingModeToolAlias(state, subTask, resolved, springToolMode);
+        log.debug("[planner] 使用默认工具映射|taskId={} |taskType={} |bindingMode={} |tool={}",
+                subTask.getId(), subTask.getType(), bindingMode, resolved);
         return resolved;
+    }
+
+    private String applyBindingModeToolAlias(PlannerState state,
+                                             PlannerState.SubTask subTask,
+                                             String defaultTool,
+                                             boolean springToolMode) {
+        if (!springToolMode || subTask == null || subTask.getType() == null) {
+            return defaultTool;
+        }
+        if ("RETRIEVE".equalsIgnoreCase(subTask.getType()) && isHybridRetrieve(state, subTask)) {
+            return "hybrid_retrieve_news";
+        }
+        return defaultTool;
+    }
+
+    private boolean isHybridRetrieve(PlannerState state, PlannerState.SubTask subTask) {
+        Object mode = subTask.getParameters() == null ? null : subTask.getParameters().get("mode");
+        if (mode != null) {
+            return "HYBRID".equalsIgnoreCase(String.valueOf(mode));
+        }
+        if (state != null && state.getRouterResult() != null && state.getRouterResult().getRetrievalMode() != null) {
+            return "HYBRID".equalsIgnoreCase(state.getRouterResult().getRetrievalMode());
+        }
+        return true;
+    }
+
+    private String resolveToolBindingMode(PlannerState state) {
+        if (state == null || state.getContext() == null) {
+            return "legacy";
+        }
+        Object raw = state.getContext().get("toolBindingMode");
+        if (raw == null) {
+            return "legacy";
+        }
+        String mode = String.valueOf(raw).trim().toLowerCase();
+        return mode.isEmpty() ? "legacy" : mode;
     }
 
     private Map<String, Object> defaultOutputSchema(String taskType) {
@@ -272,7 +321,7 @@ public class ExecutionPlanBuilderNode {
         }
 
         if (order.size() != indegree.size()) {
-            log.warn("[planner] 拓扑排序检测到依赖环，回退为原始顺序");
+            log.warn("[planner] 检测到依赖环，回退为原始任务顺序");
             return new ArrayList<>(dependencies.keySet());
         }
         return order;

@@ -2,6 +2,7 @@ package com.example.news.aggregation.agent.service;
 
 import com.example.news.aggregation.agent.client.PlannerClient;
 import com.example.news.aggregation.agent.client.RouterClient;
+import com.example.news.aggregation.agent.config.PlannerIntegrationProperties;
 import com.example.news.aggregation.agent.domain.AgentResponse;
 import com.example.news.aggregation.agent.domain.IdempotencyRecord;
 import com.example.news.aggregation.agent.domain.PipelineContext;
@@ -17,6 +18,7 @@ import com.example.news.aggregation.agent.execution.config.ExecutionPersistenceP
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.enums.RunStatus;
 import com.example.news.aggregation.agent.execution.service.ExecutionPlanDigestService;
+import com.example.news.aggregation.agent.execution.service.ExecutionEventService;
 import com.example.news.aggregation.agent.execution.service.ExecutionRunService;
 import com.example.news.aggregation.agent.fsm.ConversationFSM;
 import com.example.news.aggregation.agent.fsm.FSMContext;
@@ -57,7 +59,9 @@ public class LLMOrchestrator {
 
     private final ExecutionRunService executionRunService;
     private final ExecutionPlanDigestService executionPlanDigestService;
+    private final ExecutionEventService executionEventService;
     private final ExecutionPersistenceProperties executionPersistenceProperties;
+    private final PlannerIntegrationProperties plannerIntegrationProperties;
 
     public AgentResponse handleChat(ChatRequest request) {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
@@ -213,13 +217,34 @@ public class LLMOrchestrator {
             }
             workflowOrchestrator.executeWorkflow(directWorkflow, workflowContext);
         } else {
-            boolean usePlanner = nextAfterRoute == ConversationState.PLAN || requiresPlanner(taskFamily);
+            PlannerIntegrationProperties.PlannerMode plannerMode = plannerIntegrationProperties.resolvePlannerMode();
+            boolean usePlanner = shouldUsePlanner(taskFamily, directAnswer, plannerMode);
+            log.info("[编排][规划] 规划策略决策|sessionId={} |turnId={} |taskFamily={} |directAnswer={} |plannerMode={} |templateFirst={} |usePlanner={}",
+                    sessionId,
+                    turnId,
+                    taskFamily,
+                    directAnswer,
+                    plannerMode,
+                    plannerIntegrationProperties.isTemplateFirstEnabled(),
+                    usePlanner);
             if (usePlanner) {
                 if (currentFsmState != ConversationState.PLAN) {
                     currentFsmState = transitionState(sessionId, turnId, currentFsmState, ConversationState.PLAN);
                 }
-                ExecutionPlan plan = plannerClient.plan(request.getQuery(), routerResult);
+                Map<String, Object> plannerContext = buildPlannerContext(
+                        sessionId,
+                        turnId,
+                        taskFamily,
+                        routerResult.getRetrievalMode(),
+                        plannerMode
+                );
+                ExecutionPlan plan = plannerClient.plan(request.getQuery(), routerResult, plannerContext);
                 requireValidPlan(plan, taskFamily, request.getQuery());
+                String plannerTraceId = extractPlannerTraceId(plan);
+                if (plannerTraceId != null && !plannerTraceId.isBlank()) {
+                    workflowContext.setPlannerTraceId(plannerTraceId);
+                    workflowContext.putAttribute("workflow.planner.trace.id", plannerTraceId);
+                }
                 ExecutionRunService.RunAcquireResult acquireResult = bindRunForWorkflow(
                         workflowContext,
                         turnId,
@@ -227,6 +252,7 @@ public class LLMOrchestrator {
                         plan.getPlanId(),
                         executionPlanDigestService.sha256Hex(plan)
                 );
+                recordPlannerTraceEvent(acquireResult, plannerTraceId, plannerMode);
                 AgentResponse replayResponse = buildReplayRunResponseIfNeeded(sessionState, turnId, acquireResult);
                 if (replayResponse != null) {
                     return replayResponse;
@@ -375,6 +401,90 @@ public class LLMOrchestrator {
         return executionRunService.sha256Hex(raw);
     }
 
+    /**
+     * Planner 薄化策略：
+     * 1. LEGACY：保持历史行为，仅复杂任务触发规划；
+     * 2. HYBRID：默认模板优先（template-first=true 时仅复杂任务规划）；
+     * 3. SAA_GRAPH：除直答外尽量走规划路径。
+     */
+    private boolean shouldUsePlanner(TaskFamily taskFamily,
+                                     boolean directAnswer,
+                                     PlannerIntegrationProperties.PlannerMode plannerMode) {
+        if (directAnswer) {
+            return false;
+        }
+        boolean complexTask = requiresPlanner(taskFamily);
+        PlannerIntegrationProperties.PlannerMode effectiveMode = plannerMode == null
+                ? PlannerIntegrationProperties.PlannerMode.HYBRID
+                : plannerMode;
+        return switch (effectiveMode) {
+            case LEGACY -> complexTask;
+            case SAA_GRAPH -> true;
+            case HYBRID -> plannerIntegrationProperties.isTemplateFirstEnabled() ? complexTask : true;
+        };
+    }
+
+    /**
+     * 构建 planner 上下文：用于链路追踪和策略可观测，不改变执行期 selector/circuit/fallback 语义。
+     */
+    private Map<String, Object> buildPlannerContext(String sessionId,
+                                                    String turnId,
+                                                    TaskFamily taskFamily,
+                                                    String retrievalMode,
+                                                    PlannerIntegrationProperties.PlannerMode plannerMode) {
+        Map<String, Object> context = new HashMap<>();
+        context.put("plannerMode", plannerMode == null ? "HYBRID" : plannerMode.name());
+        context.put("templateFirst", plannerIntegrationProperties.isTemplateFirstEnabled());
+        context.put("toolBindingMode", plannerIntegrationProperties.resolveToolBindingMode());
+        context.put("sessionId", sessionId);
+        context.put("turnId", turnId);
+        context.put("taskFamily", taskFamily == null ? null : taskFamily.name());
+        context.put("retrievalMode", retrievalMode);
+        context.put("plannerTraceId", UUID.randomUUID().toString().replace("-", ""));
+        return context;
+    }
+
+    /**
+     * 从计划元数据中提取 traceId，优先使用 planner 输出，保证回放可以串联到 planner 决策。
+     */
+    private String extractPlannerTraceId(ExecutionPlan plan) {
+        if (plan == null) {
+            return null;
+        }
+        String traceId = plan.getPlannerTraceId();
+        if (traceId == null || traceId.isBlank()) {
+            return null;
+        }
+        return traceId.trim();
+    }
+
+    /**
+     * 将 planner trace 与 run 进行绑定，便于 replay 直接定位规划链路。
+     */
+    private void recordPlannerTraceEvent(ExecutionRunService.RunAcquireResult acquireResult,
+                                         String plannerTraceId,
+                                         PlannerIntegrationProperties.PlannerMode plannerMode) {
+        if (acquireResult == null || acquireResult.run() == null || plannerTraceId == null || plannerTraceId.isBlank()) {
+            return;
+        }
+        String payloadJson = "{\"plannerTraceId\":\"" + plannerTraceId + "\",\"plannerMode\":\""
+                + (plannerMode == null ? "HYBRID" : plannerMode.name()) + "\"}";
+        executionEventService.record(
+                acquireResult.run().getRunId(),
+                null,
+                "RUN_PLANNER_TRACE_BOUND",
+                acquireResult.run().getStatus(),
+                acquireResult.run().getStatus(),
+                "planner_trace_bound",
+                "planner trace id 已绑定到执行 run",
+                payloadJson
+        );
+        log.info("[编排][规划] plannerTraceId 已写入运行事件|runId={} |plannerTraceId={} |plannerMode={}",
+                acquireResult.run().getRunId(),
+                plannerTraceId,
+                plannerMode == null ? "HYBRID" : plannerMode.name());
+    }
+
     private boolean requiresPlanner(TaskFamily taskFamily) {
         return taskFamily == TaskFamily.COMPARE || taskFamily == TaskFamily.DEEP_DIVE;
     }
@@ -448,6 +558,7 @@ public class LLMOrchestrator {
         data.put("degradeOutputTriggered", attrs.getOrDefault("workflow.degrade.required", false));
         data.put("degradeReasonCode", attrs.getOrDefault("workflow.degrade.reason", ""));
         data.put("degradeStepId", attrs.getOrDefault("workflow.degrade.stepId", ""));
+        data.put("plannerTraceId", attrs.getOrDefault("workflow.planner.trace.id", ""));
 
         data.put("executionRunId", workflowContext.getRunId());
         ExecutionRunEntity run = workflowContext.getRunId() == null ? null : executionRunService.findByRunId(workflowContext.getRunId());

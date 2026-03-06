@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 重排序能力。
+ * 重排能力执行器。
  */
 @Slf4j
 @Component
@@ -48,14 +48,17 @@ public class RerankExecutor implements CapabilityExecutor {
                 ? ((Number) parameters.get("lambda")).doubleValue()
                 : 0.7;
         String sessionId = context != null ? context.getSessionId() : "unknown";
-        log.info("开始重排FLOW|agent|node=rerank_results|step=start|sessionId={}|topK={}|lambda={}|reason=提升多样性与相关性|next=重排算法",
+        log.info("[流程][重排结果] 开始执行|sessionId={} |topK={} |lambda={} |reason=提升多样性与相关性",
                 sessionId, topK, lambda);
 
         List<RetrievalResult> results = rerankTool.mmrRerank(context.getEvidence(), topK, lambda);
         context.setEvidence(results);
-        log.info("[链路最终] 重排完成FLOW|agent|node=rerank_results|step=end|sessionId={}|resultCount={}|next=生成",
+        log.info("[流程][重排结果] 执行完成|sessionId={} |resultCount={} |next=生成",
                 sessionId, results.size());
 
-        return results;
+        Map<String, Object> output = ToolOutputEnvelope.items(capabilityName(), results, "execution-plan/1.0");
+        log.info("[流程][重排结果] 输出已对象化|sessionId={} |capability={} |count={} |schemaVersion={}",
+                sessionId, capabilityName(), output.get("count"), output.get("schemaVersion"));
+        return output;
     }
 }

@@ -70,6 +70,7 @@ public class ExecutionReplayQueryService {
                         .eventCount(snapshot.getEventCount())
                         .terminalState(snapshot.getTerminalState())
                         .timelineDigest(snapshot.getTimelineDigest())
+                        .plannerTraceId(snapshot.getPlannerTraceId())
                         .build())
                 .build();
     }
