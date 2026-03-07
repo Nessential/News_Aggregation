@@ -75,8 +75,9 @@ public class GeneratorService {
                 int evidenceCount = evidence != null ? evidence.size() : 0;
                 int answerLength = draft.getAnswer() != null ? draft.getAnswer().length() : 0;
                 int citationCount = draft.getCitations() != null ? draft.getCitations().size() : 0;
+                Double qualityScore = draft.getQualityScore();
                 log.warn("GeneratorDraft 校验未通过|evidenceCount={} |answerLength={} |qualityScore={} |citationCount={}",
-                        evidenceCount, answerLength, draft.getQualityScore(), citationCount);
+                        evidenceCount, answerLength, qualityScore, citationCount);
                 if (evidenceCount > 0 && draft.getAnswer() != null && !draft.getAnswer().isBlank()) {
                     log.warn("存在证据且答案非空，返回最佳努力答案，避免误判为证据不足。");
                     return draft;

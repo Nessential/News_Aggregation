@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,10 +54,84 @@ public class WorkflowContext {
         if (results == null || results.isEmpty()) {
             return;
         }
-        this.evidence.addAll(results);
+        if (this.evidence == null) {
+            this.evidence = new ArrayList<>();
+        }
+
+        // 按 articleId 去重合并：同一篇文章可能来自 ES/Qdrant/扩展关键词的多次检索
+        Map<Long, RetrievalResult> merged = new LinkedHashMap<>();
+        List<RetrievalResult> noId = new ArrayList<>();
+
+        for (RetrievalResult r : this.evidence) {
+            if (r == null) {
+                continue;
+            }
+            if (r.getArticleId() == null) {
+                noId.add(r);
+                continue;
+            }
+            merged.merge(r.getArticleId(), r, WorkflowContext::pickBetterEvidence);
+        }
+        for (RetrievalResult r : results) {
+            if (r == null) {
+                continue;
+            }
+            if (r.getArticleId() == null) {
+                noId.add(r);
+                continue;
+            }
+            merged.merge(r.getArticleId(), r, WorkflowContext::pickBetterEvidence);
+        }
+
+        this.evidence.clear();
+        this.evidence.addAll(merged.values());
+        this.evidence.addAll(noId);
     }
 
     public void putAttribute(String key, Object value) {
         this.attributes.put(key, value);
+    }
+
+    private static RetrievalResult pickBetterEvidence(RetrievalResult a, RetrievalResult b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        // 优先保留 fullContent 更“有料”的条目（给后续 LLM content 拼装用）
+        boolean aHasFull = a.getFullContent() != null && !a.getFullContent().isBlank();
+        boolean bHasFull = b.getFullContent() != null && !b.getFullContent().isBlank();
+        if (aHasFull != bHasFull) {
+            return bHasFull ? b : a;
+        }
+
+        int aSnippetLen = a.getMatchedSnippet() != null ? a.getMatchedSnippet().trim().length() : 0;
+        int bSnippetLen = b.getMatchedSnippet() != null ? b.getMatchedSnippet().trim().length() : 0;
+        if (aSnippetLen != bSnippetLen) {
+            return bSnippetLen > aSnippetLen ? b : a;
+        }
+
+        double aScore = a.getScore() != null ? a.getScore() : 0.0;
+        double bScore = b.getScore() != null ? b.getScore() : 0.0;
+        if (aScore != bScore) {
+            return bScore > aScore ? b : a;
+        }
+
+        // 尽量补齐元数据
+        RetrievalResult winner = a;
+        if ((winner.getMetadata() == null || winner.getMetadata().isBlank())
+                && b.getMetadata() != null && !b.getMetadata().isBlank()) {
+            winner.setMetadata(b.getMetadata());
+        }
+        if ((winner.getMatchedSnippet() == null || winner.getMatchedSnippet().isBlank())
+                && b.getMatchedSnippet() != null && !b.getMatchedSnippet().isBlank()) {
+            winner.setMatchedSnippet(b.getMatchedSnippet());
+        }
+        if ((winner.getFullContent() == null || winner.getFullContent().isBlank())
+                && b.getFullContent() != null && !b.getFullContent().isBlank()) {
+            winner.setFullContent(b.getFullContent());
+        }
+        return winner;
     }
 }

@@ -16,6 +16,8 @@ public class RetrievalResultDto {
     private Double score;
     // 证据片段（摘要）
     private String snippet;
+    // 完整正文（中文）
+    private String fullContent;
     // 原始元数据（序列化后的 source/payload）
     private String metadata;
 }

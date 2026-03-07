@@ -38,4 +38,7 @@ public class Candidate implements Serializable {
 
     /** 发布时间 */
     private String publishedAt;
+
+    /** 文章图片URL */
+    private String imageUrl;
 }

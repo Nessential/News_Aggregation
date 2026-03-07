@@ -46,6 +46,10 @@ public class DraftGenerateNode {
 
         try {
             String context = buildContext(evidence, allowNoEvidence);
+            log.info("生成-构建上下文|evidenceCount={} |contextLen={} |contextSample={}",
+                    evidence != null ? evidence.size() : 0,
+                    context != null ? context.length() : 0,
+                    truncate(context, 200));
             String prompt = buildTaskPrompt(query, context, taskFamily, allowNoEvidence);
 
             ChatClient client = chatClientBuilder.build();
@@ -81,8 +85,11 @@ public class DraftGenerateNode {
         if (evidence == null || evidence.isEmpty()) {
             return allowNoEvidence ? "" : "无可用证据。";
         }
+        // prompt 期望格式: [新闻ID] 正文内容（已翻译为简体中文，仅包含正文，不含标题和图片）
+        // 去掉 title，直接用 content
         return evidence.stream()
-                .map(r -> String.format("[%s] %s: %s", r.getId(), r.getTitle(), r.getContent()))
+                .filter(r -> r.getContent() != null && !r.getContent().isBlank())
+                .map(r -> String.format("[%s] %s", r.getId(), r.getContent()))
                 .collect(Collectors.joining("\n\n"));
     }
 

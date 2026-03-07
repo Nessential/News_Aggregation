@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -63,7 +64,14 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         }
         boolean allowNoEvidence = "NONE".equalsIgnoreCase(retrievalMode);
 
-        List<RetrievalResult> evidence = convertEvidence(context.getEvidence());
+        // 获取文章详情映射（用于后续根据ID补充标题和图片）
+        Map<Long, NewsClient.NewsArticleDto> articleMap = loadArticlesForContext(context.getEvidence());
+        // 保存文章详情到 context，供后续组装响应使用
+        if (articleMap != null && !articleMap.isEmpty()) {
+            context.putAttribute("articleDetails", articleMap);
+        }
+
+        List<RetrievalResult> evidence = convertEvidence(context.getEvidence(), articleMap);
         String sessionId = context != null ? context.getSessionId() : "unknown";
         int evidenceCount = evidence != null ? evidence.size() : 0;
         long nonEmptyContentCount = evidence.stream()
@@ -71,7 +79,13 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
                 .count();
         String sample = evidence.stream()
                 .limit(3)
-                .map(item -> item.getId() + ":" + (item.getContent() == null ? 0 : item.getContent().length()))
+                .map(item -> {
+                    String id = item.getId() != null ? item.getId() : "";
+                    int titleLen = item.getTitle() != null ? item.getTitle().trim().length() : 0;
+                    int contentLen = item.getContent() != null ? item.getContent().trim().length() : 0;
+                    String contentHead = item.getContent() == null ? "" : truncate(item.getContent().trim(), 60);
+                    return id + "|t=" + titleLen + "|c=" + contentLen + "|h=" + contentHead;
+                })
                 .collect(Collectors.joining(","));
         String reason = allowNoEvidence ? "无需证据直答" : "需要证据生成";
         log.info("[链路最终] 开始生成FLOW|agent|node=llm_generate|step=start|sessionId={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|sampleContentLen={}|retrievalMode={}|reason={}|next=LLM生成",
@@ -92,29 +106,17 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         return draft.getAnswer();
     }
 
-    private List<RetrievalResult> convertEvidence(List<com.example.news.aggregation.agent.tool.dto.RetrievalResult> evidence) {
+    /**
+     * 仅为 context 加载文章详情（不转换 evidence）
+     */
+    private Map<Long, NewsClient.NewsArticleDto> loadArticlesForContext(List<com.example.news.aggregation.agent.tool.dto.RetrievalResult> evidence) {
         if (evidence == null || evidence.isEmpty()) {
-            return List.of();
+            return Map.of();
         }
-
-        Map<Long, NewsClient.NewsArticleDto> articleMap = loadArticles(evidence);
-        return evidence.stream()
-                .map(item -> RetrievalResult.builder()
-                        .id(item.getArticleId() != null ? String.valueOf(item.getArticleId()) : "")
-                        .title(resolveTitle(item, articleMap))
-                        .content(resolveContent(item, articleMap))
-                        .url(resolveUrl(item, articleMap))
-                        .score(item.getScore() != null ? item.getScore() : 0.0)
-                        .source(resolveSource(item, articleMap))
-                        .build())
-                .collect(Collectors.toList());
-    }
-
-    private Map<Long, NewsClient.NewsArticleDto> loadArticles(List<com.example.news.aggregation.agent.tool.dto.RetrievalResult> evidence) {
         Set<Long> ids = evidence.stream()
                 .map(com.example.news.aggregation.agent.tool.dto.RetrievalResult::getArticleId)
                 .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+                .collect(java.util.stream.Collectors.toSet());
         if (ids.isEmpty()) {
             return Map.of();
         }
@@ -131,6 +133,60 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         return map;
     }
 
+    private List<RetrievalResult> convertEvidence(List<com.example.news.aggregation.agent.tool.dto.RetrievalResult> evidence,
+                                                  Map<Long, NewsClient.NewsArticleDto> articleMap) {
+        if (evidence == null || evidence.isEmpty()) {
+            return List.of();
+        }
+
+        // 如果没有传入 articleMap，则重新加载
+        final Map<Long, NewsClient.NewsArticleDto> effectiveMap;
+        if (articleMap == null || articleMap.isEmpty()) {
+            effectiveMap = loadArticlesForContext(evidence);
+        } else {
+            effectiveMap = articleMap;
+        }
+
+        List<RetrievalResult> mapped = evidence.stream()
+                .map(item -> RetrievalResult.builder()
+                        .id(item.getArticleId() != null ? String.valueOf(item.getArticleId()) : "")
+                        .title(resolveTitle(item, effectiveMap))
+                        .content(resolveContent(item, effectiveMap))
+                        .url(resolveUrl(item, effectiveMap))
+                        .score(item.getScore() != null ? item.getScore() : 0.0)
+                        .source(resolveSource(item, effectiveMap))
+                        .build())
+                .toList();
+
+        // 过滤掉空内容（content 为空会导致 LLM 侧 context 虽然“有很多条”，但信息量接近 0）
+        List<RetrievalResult> nonBlank = mapped.stream()
+                .filter(item -> item != null && item.getContent() != null && !item.getContent().isBlank())
+                .toList();
+
+        // 二次去重：按 id（即 articleId 字符串）保留 content 更长/score 更高的条目
+        Map<String, RetrievalResult> dedup = new LinkedHashMap<>();
+        List<RetrievalResult> noId = new java.util.ArrayList<>();
+        for (RetrievalResult r : nonBlank) {
+            if (r == null || r.getId() == null || r.getId().isBlank()) {
+                noId.add(r);
+                continue;
+            }
+            dedup.merge(r.getId(), r, (a, b) -> {
+                int aLen = a.getContent() != null ? a.getContent().trim().length() : 0;
+                int bLen = b.getContent() != null ? b.getContent().trim().length() : 0;
+                if (aLen != bLen) {
+                    return bLen > aLen ? b : a;
+                }
+                double aScore = a.getScore() != null ? a.getScore() : 0.0;
+                double bScore = b.getScore() != null ? b.getScore() : 0.0;
+                return bScore > aScore ? b : a;
+            });
+        }
+        List<RetrievalResult> cleaned = new java.util.ArrayList<>(dedup.values());
+        cleaned.addAll(noId);
+        return cleaned;
+    }
+
     private String resolveTitle(com.example.news.aggregation.agent.tool.dto.RetrievalResult item,
                                 Map<Long, NewsClient.NewsArticleDto> articleMap) {
         NewsClient.NewsArticleDto article = articleMap.get(item.getArticleId());
@@ -140,9 +196,10 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
     private String resolveContent(com.example.news.aggregation.agent.tool.dto.RetrievalResult item,
                                   Map<Long, NewsClient.NewsArticleDto> articleMap) {
         NewsClient.NewsArticleDto article = articleMap.get(item.getArticleId());
+        // 优先使用 fullContent（中文正文），其次 matchedSnippet，最后 fallback 到 article 内容
         return firstNonBlank(
-                item.getMatchedSnippet(),
-                item.getFullContent(),
+                item.getFullContent(),     // 中文正文（优先）
+                item.getMatchedSnippet(),  // 检索片段
                 article != null ? article.getContent() : null,
                 article != null ? article.getTitle() : null,
                 ""
@@ -171,5 +228,15 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
             }
         }
         return "";
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        if (maxLength <= 0) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }

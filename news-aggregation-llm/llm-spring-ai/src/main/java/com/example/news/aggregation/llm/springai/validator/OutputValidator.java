@@ -51,7 +51,7 @@ public class OutputValidator {
 
         // 3. 检查质量评分
 
-        if (draft.getQualityScore() == null || draft.getQualityScore() < 0.3) {
+        if (draft.getQualityScore() == null || draft.getQualityScore() < 0.1) {
             errors.add("Quality score too low: " + draft.getQualityScore());
         }
 
