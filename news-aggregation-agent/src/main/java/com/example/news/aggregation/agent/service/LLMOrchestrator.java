@@ -185,6 +185,7 @@ public class LLMOrchestrator {
         WorkflowContext workflowContext = WorkflowContext.builder()
                 .sessionId(sessionId)
                 .query(request.getQuery())
+                .queryInterpretation(routerResult.getQueryInterpretation())
                 .taskFamily(routerResult.getTaskFamily())
                 .workerId(executionPersistenceProperties.getPersistence().getWorkerId())
                 .recoveryMode(false)

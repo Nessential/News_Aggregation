@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 生成服务
@@ -29,21 +30,30 @@ public class GeneratorService {
      * 生成答案草稿
      *
      * @param query 用户查询
+     * @param queryInterpretation 查询理解/规范化描述
      * @param taskFamily 任务类型
      * @param evidence 证据列表
      * @return 生成草稿
      */
-    public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
+    public GeneratorDraft generate(String query, String queryInterpretation, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
         // 配置关闭GeneratorGraph时直接降级
         if (!graphProperties.isGeneratorEnabled()) {
             return GeneratorDraft.conservative("生成能力未启用");
         }
+
+        int evidenceCount = evidence != null ? evidence.size() : 0;
+        long nonEmptyContentCount = evidence != null ? evidence.stream()
+                .filter(e -> e.getContent() != null && !e.getContent().isBlank())
+                .count() : 0;
+        log.info("[LLM-Generator] 接收请求|query={}|queryInterpretation={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|retrievalMode={}",
+                query, queryInterpretation, taskFamily, evidenceCount, nonEmptyContentCount, retrievalMode);
 
         int maxRetries = graphProperties.getMaxIterations();
         boolean allowNoEvidence = "NONE".equalsIgnoreCase(retrievalMode);
 
         GeneratorState state = GeneratorState.builder()
                 .query(query)
+                .queryInterpretation(queryInterpretation)
                 .taskFamily(taskFamily)
                 .retrievalMode(retrievalMode)
                 .allowNoEvidence(allowNoEvidence)
@@ -72,13 +82,13 @@ public class GeneratorService {
             }
 
             if (!validator.validate(draft)) {
-                int evidenceCount = evidence != null ? evidence.size() : 0;
+                int validateEvidenceCount = evidence != null ? evidence.size() : 0;
                 int answerLength = draft.getAnswer() != null ? draft.getAnswer().length() : 0;
                 int citationCount = draft.getCitations() != null ? draft.getCitations().size() : 0;
                 Double qualityScore = draft.getQualityScore();
                 log.warn("GeneratorDraft 校验未通过|evidenceCount={} |answerLength={} |qualityScore={} |citationCount={}",
-                        evidenceCount, answerLength, qualityScore, citationCount);
-                if (evidenceCount > 0 && draft.getAnswer() != null && !draft.getAnswer().isBlank()) {
+                        validateEvidenceCount, answerLength, qualityScore, citationCount);
+                if (validateEvidenceCount > 0 && draft.getAnswer() != null && !draft.getAnswer().isBlank()) {
                     log.warn("存在证据且答案非空，返回最佳努力答案，避免误判为证据不足。");
                     return draft;
                 }
@@ -92,7 +102,11 @@ public class GeneratorService {
         }
     }
 
+    public GeneratorDraft generate(String query, String queryInterpretation, String taskFamily, List<RetrievalResult> evidence) {
+        return generate(query, queryInterpretation, taskFamily, evidence, null);
+    }
+
     public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence) {
-        return generate(query, taskFamily, evidence, null);
+        return generate(query, null, taskFamily, evidence, null);
     }
 }

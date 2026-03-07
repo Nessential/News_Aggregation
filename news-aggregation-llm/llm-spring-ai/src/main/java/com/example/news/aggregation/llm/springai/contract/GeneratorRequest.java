@@ -21,6 +21,9 @@ public class GeneratorRequest {
     /** 用户查询 */
     private String query;
 
+    /** 查询理解/规范化描述 */
+    private String queryInterpretation;
+
     /** 任务类型 */
     private String taskFamily;
 

@@ -91,7 +91,8 @@ public class LlmGenerateExecutor implements CapabilityExecutor {
         log.info("[链路最终] 开始生成FLOW|agent|node=llm_generate|step=start|sessionId={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|sampleContentLen={}|retrievalMode={}|reason={}|next=LLM生成",
                 sessionId, taskFamily, evidenceCount, nonEmptyContentCount, sample, retrievalMode, reason);
 
-        GeneratorDraft draft = generatorClient.generate(context.getQuery(), taskFamily, evidence, retrievalMode);
+        String queryInterpretation = context.getQueryInterpretation();
+        GeneratorDraft draft = generatorClient.generate(context.getQuery(), queryInterpretation, taskFamily, evidence, retrievalMode);
         if (draft == null || draft.getAnswer() == null || draft.getAnswer().isBlank()) {
             String fallback = "证据不足或质量不足";
             context.putAttribute("answer", fallback);

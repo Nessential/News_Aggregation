@@ -39,7 +39,10 @@ public class DraftGenerateNode {
     public GeneratorState execute(GeneratorState state) {
         state.incrementStep();
 
+        // 优先使用 queryInterpretation，如果没有则回退到 query
         String query = state.getQuery();
+        String queryInterpretation = state.getQueryInterpretation();
+        String effectiveQuery = (queryInterpretation != null && !queryInterpretation.isBlank()) ? queryInterpretation : query;
         String taskFamily = state.getTaskFamily() != null ? state.getTaskFamily() : "QA";
         List<RetrievalResult> evidence = state.getEvidence();
         boolean allowNoEvidence = Boolean.TRUE.equals(state.getAllowNoEvidence());
@@ -50,7 +53,7 @@ public class DraftGenerateNode {
                     evidence != null ? evidence.size() : 0,
                     context != null ? context.length() : 0,
                     truncate(context, 200));
-            String prompt = buildTaskPrompt(query, context, taskFamily, allowNoEvidence);
+            String prompt = buildTaskPrompt(effectiveQuery, context, taskFamily, allowNoEvidence);
 
             ChatClient client = chatClientBuilder.build();
             String raw = client.prompt()

@@ -70,6 +70,9 @@ public class RouterState {
     /** 提取的实体列表 */
     private List<String> entities;
 
+    /** 查询理解/规范化描述（帮助生成阶段正确理解用户意图） */
+    private String queryInterpretation;
+
     /** 执行步数 */
     private int stepCount;
 
@@ -96,6 +99,7 @@ public class RouterState {
                 .taskConfidence(taskConfidence)
                 .taskReason(taskReason)
                 .entities(entities)
+                .queryInterpretation(queryInterpretation)
                 .build();
     }
 }
