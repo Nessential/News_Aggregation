@@ -80,13 +80,18 @@ public class LLMOrchestrator {
                         plan.getSteps() != null ? plan.getSteps().size() : 0);
             }
 
-            // 4) 检索与重排
-            List<RetrievalResult> retrievalResults = retrieve(userMessage, routerResult);
-            List<RetrievalResult> rerankedResults = rerank(userMessage, retrievalResults);
+            // 4) 检索与重排（优先使用queryInterpretation，否则使用原始query）
+            String effectiveQuery = routerResult.getQueryInterpretation();
+            if (effectiveQuery == null || effectiveQuery.isBlank()) {
+                effectiveQuery = userMessage;
+            }
+            List<RetrievalResult> retrievalResults = retrieve(effectiveQuery, routerResult);
+            List<RetrievalResult> rerankedResults = rerank(effectiveQuery, retrievalResults);
 
             // 5) Generator
             GeneratorDraft draft = generatorService.generate(
                     userMessage,
+                    routerResult.getQueryInterpretation(),
                     routerResult.getTaskFamily(),
                     rerankedResults,
                     routerResult.getRetrievalMode()

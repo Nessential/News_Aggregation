@@ -109,6 +109,7 @@ public class SlotExtractionNode {
         try {
             JsonNode root = objectMapper.readTree(json);
             String taskFamily = root.path("taskFamily").asText("").trim();
+            String queryInterpretation = root.path("queryInterpretation").asText(null);
             String timeRange = root.path("timeRange").asText(null);
             String startDate = root.path("startDate").asText(null);
             String endDate = root.path("endDate").asText(null);
@@ -126,6 +127,7 @@ public class SlotExtractionNode {
                 taskFamily = "QA";
             }
             state.setTaskFamily(taskFamily.toUpperCase());
+            state.setQueryInterpretation(queryInterpretation);
             state.setTaskConfidence(confidence);
             state.setTaskReason(reason);
 

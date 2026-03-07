@@ -54,6 +54,9 @@ public class RouterResult {
     /** 提取的实体列表（国家/公司/人物/事件等） */
     private List<String> entities;
 
+    /** 查询理解/规范化描述（帮助生成阶段正确理解用户意图，例如：检索所有关于'中国'或'特斯拉'的新闻） */
+    private String queryInterpretation;
+
     /**
      * 创建默认QA结果（兜底）
      * 当Router失败时返回此结果
