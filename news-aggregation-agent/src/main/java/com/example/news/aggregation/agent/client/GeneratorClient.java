@@ -13,9 +13,6 @@ import org.springframework.web.client.RestTemplate;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Generator 客户端(HTTP)。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -26,13 +23,7 @@ public class GeneratorClient {
     @Value("${app.llm.base-url:http://localhost:8081}")
     private String llmBaseUrl;
 
-    /**
-     * 调用 GeneratorGraph。
-     * @param query 原始用户查询
-     * @param queryInterpretation 意图识别阶段的查询理解/改写（优先用于生成，为空时用 query）
-     */
     public GeneratorDraft generate(String query, String queryInterpretation, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
-        // TODO 改为 RPC 调用
         String url = llmBaseUrl + "/api/graph/generate";
         GeneratorRequest request = GeneratorRequest.builder()
                 .query(query)
@@ -50,12 +41,21 @@ public class GeneratorClient {
                     .limit(2)
                     .map(e -> "id=" + e.getId() + "|contentLen=" + (e.getContent() != null ? e.getContent().length() : 0))
                     .collect(Collectors.joining(",")) : "";
-            log.info("[client] 调用生成服务FLOW|agent|client=generator|step=start|url={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|sample={}|next=LLM-Generator",
+            log.info("[client] call generator|url={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|sample={}",
                     url, taskFamily, evidenceCount, nonEmptyContentCount, sample);
+
             ResponseEntity<GeneratorDraft> response = restTemplate.postForEntity(url, request, GeneratorDraft.class);
             GeneratorDraft body = response.getBody();
-            int answerLength = body != null && body.getAnswer() != null ? body.getAnswer().length() : 0;
-            log.info("[client] 生成返回FLOW|agent|client=generator|step=end|answerLength={}|next=响应组装", answerLength);
+
+            int answerLength = body != null && body.getAnswerItems() != null
+                    ? body.getAnswerItems().stream()
+                    .map(GeneratorDraft.AnswerItem::getText)
+                    .filter(text -> text != null && !text.isBlank())
+                    .mapToInt(String::length)
+                    .sum()
+                    : 0;
+            int answerItems = body != null && body.getAnswerItems() != null ? body.getAnswerItems().size() : 0;
+            log.info("[client] generator done|answerLength={}|answerItems={}", answerLength, answerItems);
             return body;
         } catch (Exception e) {
             log.warn("GeneratorClient generate failed, error={}", e.getMessage());

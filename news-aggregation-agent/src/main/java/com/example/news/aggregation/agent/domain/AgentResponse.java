@@ -10,9 +10,6 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * Agent 统一响应体。
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -26,15 +23,30 @@ public class AgentResponse implements Serializable {
     private String errorCode;
     private String runningTurnId;
 
+    /** Full merged text for logging/history. */
     private String answer;
-    private List<Candidate> candidates;
-    private List<String> citations;
+
+    /** New structured answer for frontend rendering. */
+    private List<AnswerItemView> answerItems;
+
     private TaskFamily taskFamily;
     private Boolean needsClarification;
     private String clarificationPrompt;
     private LocalDateTime timestamp;
     private Long executionTimeMs;
     private ResponseMetadata metadata;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AnswerItemView implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private String text;
+        private List<Long> newsIds;
+        private List<Candidate> relatedNews;
+    }
 
     @Data
     @Builder
@@ -60,7 +72,6 @@ public class AgentResponse implements Serializable {
         private String degradeReasonCode;
         private String degradeStepId;
 
-        /** 第三周新增：持久化执行观测字段。 */
         private String executionRunId;
         private String executionRunStatus;
         private String currentExecutionStep;

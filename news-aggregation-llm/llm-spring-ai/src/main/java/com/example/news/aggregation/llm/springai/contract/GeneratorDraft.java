@@ -8,54 +8,37 @@ import lombok.NoArgsConstructor;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 生成器草稿契约
- * 包含LLM生成的答案、引用与质量评分
- */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class GeneratorDraft {
 
-    /** 生成的答案文本 */
-    private String answer;
+    /** Structured answer items; each item links to one or more news IDs. */
+    private List<AnswerItem> answerItems;
 
-    /** 引用列表 */
-    private List<Citation> citations;
-
-    /** 质量评分（0.0-1.0） */
+    /** Quality score in range [0,1]. */
     private Double qualityScore;
 
-    /**
-     * 引用信息
-     */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Citation {
-        /** 来源文档ID */
-        private String sourceId;
-
-        /** 引用上下文文本 */
+    public static class AnswerItem {
+        /** One answer sentence/paragraph shown to user. */
         private String text;
 
-        /** 引用位置 */
-        private Integer position;
+        /** Related news ids backing this answer item. */
+        private List<String> newsIds;
     }
 
-    /**
-     * 创建保守型兜底答案
-     * 当校验失败时使用
-     *
-     * @param evidenceSummary 证据摘要
-     * @return 保守型答案
-     */
     public static GeneratorDraft conservative(String evidenceSummary) {
+        AnswerItem item = AnswerItem.builder()
+                .text("根据可用信息，" + evidenceSummary)
+                .newsIds(new ArrayList<>())
+                .build();
         return GeneratorDraft.builder()
-                .answer("根据可用信息：" + evidenceSummary)
-                .citations(new ArrayList<>())
+                .answerItems(List.of(item))
                 .qualityScore(0.5)
                 .build();
     }

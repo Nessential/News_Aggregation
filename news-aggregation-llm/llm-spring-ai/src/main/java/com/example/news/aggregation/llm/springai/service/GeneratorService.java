@@ -11,12 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
-/**
- * 生成服务
- * 封装GeneratorGraph调用与重试逻辑
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -26,17 +21,7 @@ public class GeneratorService {
     private final OutputValidator validator;
     private final GraphProperties graphProperties;
 
-    /**
-     * 生成答案草稿
-     *
-     * @param query 用户查询
-     * @param queryInterpretation 查询理解/规范化描述
-     * @param taskFamily 任务类型
-     * @param evidence 证据列表
-     * @return 生成草稿
-     */
     public GeneratorDraft generate(String query, String queryInterpretation, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
-        // 配置关闭GeneratorGraph时直接降级
         if (!graphProperties.isGeneratorEnabled()) {
             return GeneratorDraft.conservative("生成能力未启用");
         }
@@ -45,7 +30,7 @@ public class GeneratorService {
         long nonEmptyContentCount = evidence != null ? evidence.stream()
                 .filter(e -> e.getContent() != null && !e.getContent().isBlank())
                 .count() : 0;
-        log.info("[LLM-Generator] 接收请求|query={}|queryInterpretation={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|retrievalMode={}",
+        log.info("[LLM-Generator] request|query={}|queryInterpretation={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|retrievalMode={}",
                 query, queryInterpretation, taskFamily, evidenceCount, nonEmptyContentCount, retrievalMode);
 
         int maxRetries = graphProperties.getMaxIterations();
@@ -63,33 +48,28 @@ public class GeneratorService {
                 .build();
 
         try {
-            // Graph 内部处理循环与重试，外层只负责一次调用
             GeneratorState finalState = generatorGraph.invoke(state);
-
             GeneratorDraft draft = finalState.getDraft();
             if (draft == null) {
                 return GeneratorDraft.conservative("暂无可用答案");
             }
 
-            // 同步质量评分
             draft.setQualityScore(finalState.getQualityScore());
 
             if (allowNoEvidence) {
-                if (draft.getAnswer() == null || draft.getAnswer().isBlank()) {
+                if (!hasAnyTextAnswerItem(draft)) {
                     return GeneratorDraft.conservative("暂无可用答案");
                 }
                 return draft;
             }
 
             if (!validator.validate(draft)) {
-                int validateEvidenceCount = evidence != null ? evidence.size() : 0;
-                int answerLength = draft.getAnswer() != null ? draft.getAnswer().length() : 0;
-                int citationCount = draft.getCitations() != null ? draft.getCitations().size() : 0;
+                int itemCount = draft.getAnswerItems() != null ? draft.getAnswerItems().size() : 0;
                 Double qualityScore = draft.getQualityScore();
-                log.warn("GeneratorDraft 校验未通过|evidenceCount={} |answerLength={} |qualityScore={} |citationCount={}",
-                        validateEvidenceCount, answerLength, qualityScore, citationCount);
-                if (validateEvidenceCount > 0 && draft.getAnswer() != null && !draft.getAnswer().isBlank()) {
-                    log.warn("存在证据且答案非空，返回最佳努力答案，避免误判为证据不足。");
+                log.warn("GeneratorDraft validate failed|evidenceCount={} |itemCount={} |qualityScore={}",
+                        evidenceCount, itemCount, qualityScore);
+                if (evidenceCount > 0 && hasAnyTextAnswerItem(draft)) {
+                    log.warn("evidence exists and answerItems have text, keep best-effort draft");
                     return draft;
                 }
                 return GeneratorDraft.conservative("证据不足或质量不足");
@@ -108,5 +88,13 @@ public class GeneratorService {
 
     public GeneratorDraft generate(String query, String taskFamily, List<RetrievalResult> evidence) {
         return generate(query, null, taskFamily, evidence, null);
+    }
+
+    private boolean hasAnyTextAnswerItem(GeneratorDraft draft) {
+        if (draft == null || draft.getAnswerItems() == null || draft.getAnswerItems().isEmpty()) {
+            return false;
+        }
+        return draft.getAnswerItems().stream()
+                .anyMatch(item -> item != null && item.getText() != null && !item.getText().isBlank());
     }
 }
