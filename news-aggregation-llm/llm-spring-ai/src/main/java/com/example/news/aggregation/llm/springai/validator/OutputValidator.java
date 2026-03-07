@@ -1,8 +1,8 @@
 package com.example.news.aggregation.llm.springai.validator;
 
-import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
 import com.example.news.aggregation.llm.springai.contract.ExecutionPlan;
 import com.example.news.aggregation.llm.springai.contract.ExecutionStep;
+import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -10,20 +10,10 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 输出校验器
- * 校验LLM生成的答案质量
- */
 @Slf4j
 @Component
 public class OutputValidator {
 
-    /**
-     * 校验生成的答案
-     *
-     * @param draft 生成草稿
-     * @return 校验是否通过
-     */
     public boolean validate(GeneratorDraft draft) {
         if (draft == null) {
             log.warn("Validation failed: draft is null");
@@ -31,40 +21,33 @@ public class OutputValidator {
         }
 
         List<String> errors = new ArrayList<>();
+        List<GeneratorDraft.AnswerItem> items = draft.getAnswerItems();
 
-        // 1. 检查答案是否为空
-
-        if (draft.getAnswer() == null || draft.getAnswer().trim().isEmpty()) {
-            errors.add("Answer is empty");
-        }
-
-        // 2. 检查答案长度（过短或过长）
-
-        if (draft.getAnswer() != null) {
-            int length = draft.getAnswer().length();
-            if (length < 10) {
-                errors.add("Answer too short (< 10 characters)");
-            } else if (length > 10000) {
-                errors.add("Answer too long (> 10000 characters)");
+        if (items == null || items.isEmpty()) {
+            errors.add("answerItems is empty");
+        } else {
+            boolean hasNonBlankText = false;
+            for (GeneratorDraft.AnswerItem item : items) {
+                if (item != null && item.getText() != null && !item.getText().isBlank()) {
+                    hasNonBlankText = true;
+                    int len = item.getText().length();
+                    if (len > 10000) {
+                        errors.add("Answer item too long (> 10000 characters)");
+                        break;
+                    }
+                    if (containsDangerousContent(item.getText())) {
+                        errors.add("Answer item contains potentially dangerous content");
+                        break;
+                    }
+                }
+            }
+            if (!hasNonBlankText) {
+                errors.add("All answerItems.text are empty");
             }
         }
 
-        // 3. 检查质量评分
-
         if (draft.getQualityScore() == null || draft.getQualityScore() < 0.1) {
             errors.add("Quality score too low: " + draft.getQualityScore());
-        }
-
-        // 4. 检查是否包含引用（可选）
-
-        if (draft.getCitations() == null || draft.getCitations().isEmpty()) {
-            log.debug("No citations provided (may be acceptable for some queries)");
-        }
-
-        // 5. 检查危险内容（简单关键词检测）
-
-        if (containsDangerousContent(draft.getAnswer())) {
-            errors.add("Answer contains potentially dangerous content");
         }
 
         if (!errors.isEmpty()) {
@@ -72,16 +55,9 @@ public class OutputValidator {
             return false;
         }
 
-        log.info("Validation passed for draft with quality score: {}", draft.getQualityScore());
         return true;
     }
 
-    /**
-     * 校验Router结果
-     *
-     * @param result Router结果
-     * @return 是否通过
-     */
     public boolean validateRouter(RouterResult result) {
         if (result == null) {
             log.warn("RouterResult is null");
@@ -98,12 +74,6 @@ public class OutputValidator {
         return true;
     }
 
-    /**
-     * 校验Plan结果
-     *
-     * @param plan 计划
-     * @return 是否通过
-     */
     public boolean validateExecutionPlan(ExecutionPlan plan) {
         if (plan == null) {
             log.warn("ExecutionPlan is null");
@@ -126,61 +96,28 @@ public class OutputValidator {
         return true;
     }
 
-    /**
-     * 检查是否包含危险内容
-     * MVP实现：简单关键词匹配
-     * 生产环境：应使用专业的内容安全API
-     */
     private boolean containsDangerousContent(String text) {
         if (text == null) {
             return false;
         }
-
         String lowerText = text.toLowerCase();
-
-        // 简单的危险关键词列表（示例）
-        String[] dangerousKeywords = {
-            "暴力",
-            "血腥",
-            "色情",
-            "赌博",
-            "诈骗"
-        };
-
+        String[] dangerousKeywords = {"暴力", "血腥", "色情", "赌博", "诈骗"};
         for (String keyword : dangerousKeywords) {
             if (lowerText.contains(keyword)) {
-                log.warn("Detected dangerous keyword: {}", keyword);
                 return true;
             }
         }
-
         return false;
     }
 
-    /**
-     * 校验答案并返回详细信息
-     *
-     * @param draft 生成草稿
-     * @return 校验结果（包含错误信息）
-     */
     public ValidationResult validateWithDetails(GeneratorDraft draft) {
         boolean isValid = validate(draft);
-
         ValidationResult result = new ValidationResult();
         result.setValid(isValid);
-
-        if (!isValid) {
-            result.setMessage("Validation failed");
-        } else {
-            result.setMessage("Validation passed");
-        }
-
+        result.setMessage(isValid ? "Validation passed" : "Validation failed");
         return result;
     }
 
-    /**
-     * 校验结果类
-     */
     public static class ValidationResult {
         private boolean valid;
         private String message;

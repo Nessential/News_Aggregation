@@ -11,35 +11,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * 草稿生成节点
- * 基于证据包生成初稿
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class DraftGenerateNode {
 
-    /** ChatClient构建器 */
     private final ChatClient.Builder chatClientBuilder;
-    /** 提示词仓库 */
     private final PromptRegistry promptRegistry;
-    /** JSON解析器 */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /**
-     * 执行草稿生成
-     *
-     * @param state Generator状态
-     * @return 更新后的状态
-     */
     public GeneratorState execute(GeneratorState state) {
         state.incrementStep();
 
-        // 优先使用 queryInterpretation，如果没有则回退到 query
         String query = state.getQuery();
         String queryInterpretation = state.getQueryInterpretation();
         String effectiveQuery = (queryInterpretation != null && !queryInterpretation.isBlank()) ? queryInterpretation : query;
@@ -49,36 +36,22 @@ public class DraftGenerateNode {
 
         try {
             String context = buildContext(evidence, allowNoEvidence);
-            log.info("生成-构建上下文|evidenceCount={} |contextLen={} |contextSample={}",
-                    evidence != null ? evidence.size() : 0,
-                    context != null ? context.length() : 0,
-                    truncate(context, 200));
             String prompt = buildTaskPrompt(effectiveQuery, context, taskFamily, allowNoEvidence);
 
             ChatClient client = chatClientBuilder.build();
-            String raw = client.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
-            log.info("生成-模型原始输出(截断)={}", truncate(raw, 500));
+            String raw = client.prompt().user(prompt).call().content();
+            log.info("generator raw output sample={}", truncate(raw, 500));
 
-            GeneratorDraft draft = parseJsonDraft(raw, allowNoEvidence);
-            int answerLength = draft != null && draft.getAnswer() != null ? draft.getAnswer().length() : 0;
-            int citationCount = draft != null && draft.getCitations() != null ? draft.getCitations().size() : 0;
-            String citationIds = draft != null && draft.getCitations() != null
-                    ? draft.getCitations().stream()
-                    .map(GeneratorDraft.Citation::getSourceId)
-                    .filter(id -> id != null && !id.isBlank())
-                    .limit(5)
-                    .collect(Collectors.joining(","))
-                    : "";
-            log.info("生成草稿解析完成|answerLength={} |citationCount={} |citationIds={}",
-                    answerLength, citationCount, citationIds);
-
+            GeneratorDraft draft = parseJsonDraft(raw);
+            int itemCount = draft.getAnswerItems() != null ? draft.getAnswerItems().size() : 0;
+            int linkedNewsCount = draft.getAnswerItems() == null ? 0 : draft.getAnswerItems().stream()
+                    .mapToInt(item -> item.getNewsIds() == null ? 0 : item.getNewsIds().size())
+                    .sum();
+            log.info("generator parsed draft done|itemCount={}|linkedNewsCount={}", itemCount, linkedNewsCount);
             state.setDraft(draft);
         } catch (Exception e) {
-            log.warn("DraftGenerateNode failed, fallback to empty answer. error={}", e.getMessage());
-            state.setDraft(GeneratorDraft.builder().answer("").build());
+            log.warn("DraftGenerateNode failed, fallback to empty answer items. error={}", e.getMessage());
+            state.setDraft(GeneratorDraft.builder().answerItems(List.of()).build());
         }
 
         return state;
@@ -88,8 +61,6 @@ public class DraftGenerateNode {
         if (evidence == null || evidence.isEmpty()) {
             return allowNoEvidence ? "" : "无可用证据。";
         }
-        // prompt 期望格式: [新闻ID] 正文内容（已翻译为简体中文，仅包含正文，不含标题和图片）
-        // 去掉 title，直接用 content
         return evidence.stream()
                 .filter(r -> r.getContent() != null && !r.getContent().isBlank())
                 .map(r -> String.format("[%s] %s", r.getId(), r.getContent()))
@@ -99,111 +70,94 @@ public class DraftGenerateNode {
     private String buildTaskPrompt(String query, String context, String taskFamily, boolean allowNoEvidence) {
         String safeQuery = query == null ? "" : query;
         String safeContext = context == null ? "" : context;
-        if (allowNoEvidence) {
-            String template = promptRegistry.getPrompt("generate-direct", "");
-            if (template == null || template.isBlank()) {
-                log.warn("DraftGenerateNode missing prompt template: generate-direct");
-                return "";
-            }
-            return renderTemplate(template, safeQuery, safeContext);
-        }
-        switch (taskFamily) {
-            case "SUMMARY":
-                return renderTemplateOrEmpty("generate-summary", safeQuery, safeContext);
-            case "COMPARE":
-                return renderTemplateOrEmpty("generate-compare", safeQuery, safeContext);
-            case "TIMELINE":
-                return renderTemplateOrEmpty("generate-timeline", safeQuery, safeContext);
-            case "DEEP_DIVE":
-                return renderTemplateOrEmpty("generate-deep-dive", safeQuery, safeContext);
-            case "QA":
-            default:
-                return renderTemplateOrEmpty("generate-qa", safeQuery, safeContext);
-        }
-    }
 
-    private String renderTemplate(String template, String query, String context) {
-        if (template == null) {
-            return "";
+        String base;
+        if (allowNoEvidence) {
+            base = promptRegistry.getPrompt("generate-direct", "");
+        } else {
+            base = switch (taskFamily) {
+                case "SUMMARY" -> promptRegistry.getPrompt("generate-summary", "");
+                case "COMPARE" -> promptRegistry.getPrompt("generate-compare", "");
+                case "TIMELINE" -> promptRegistry.getPrompt("generate-timeline", "");
+                case "DEEP_DIVE" -> promptRegistry.getPrompt("generate-deep-dive", "");
+                default -> promptRegistry.getPrompt("generate-qa", "");
+            };
         }
-        String safeQuery = query == null ? "" : query;
-        String safeContext = context == null ? "" : context;
-        return template
+        if (base == null || base.isBlank()) {
+            base = "";
+        }
+
+        String rendered = base
                 .replace("{{query}}", safeQuery)
                 .replace("{{context}}", safeContext);
+
+        // Hard schema guard: only new structured format is accepted.
+        String schemaInstruction = "\n\n仅输出严格JSON，不要输出任何额外文本。输出格式必须是:\n"
+                + "{\n"
+                + "  \"answerItems\": [\n"
+                + "    {\"text\": \"单条回答\", \"newsIds\": [\"76\", \"102\"]}\n"
+                + "  ]\n"
+                + "}\n"
+                + "要求:\n"
+                + "1) answerItems 至少1条;\n"
+                + "2) 每条 text 不能为空;\n"
+                + "3) newsIds 必须是字符串ID数组; 若确实无证据可填空数组。";
+        return rendered + schemaInstruction;
     }
 
-    private String renderTemplateOrEmpty(String key, String query, String context) {
-        String template = promptRegistry.getPrompt(key, "");
-        if (template == null || template.isBlank()) {
-            log.warn("DraftGenerateNode missing prompt template: {}", key);
-            return "";
-        }
-        return renderTemplate(template, query, context);
-    }
-
-    private String truncate(String text, int maxLen) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
-
-    private GeneratorDraft parseJsonDraft(String raw, boolean allowNoEvidence) {
+    private GeneratorDraft parseJsonDraft(String raw) {
         if (raw == null || raw.isBlank()) {
-            return GeneratorDraft.builder().answer("").build();
+            return GeneratorDraft.builder().answerItems(List.of()).build();
         }
+
         String json = extractJson(raw);
         if (json == null || json.isBlank()) {
             log.warn("DraftGenerateNode output is not valid JSON.");
-            return GeneratorDraft.builder().answer("").build();
+            return GeneratorDraft.builder().answerItems(List.of()).build();
         }
+
         try {
             JsonNode root = objectMapper.readTree(json);
-            String answer = root.path("answer").asText("");
-            List<GeneratorDraft.Citation> citations = parseCitations(root.path("citations"));
-            if (allowNoEvidence && citations.isEmpty()) {
-                return GeneratorDraft.builder().answer(answer).citations(citations).build();
-            }
-            return GeneratorDraft.builder().answer(answer).citations(citations).build();
+            List<GeneratorDraft.AnswerItem> answerItems = parseAnswerItems(root.path("answerItems"));
+            return GeneratorDraft.builder().answerItems(answerItems).build();
         } catch (Exception e) {
             log.warn("DraftGenerateNode JSON parse failed: {}", e.getMessage());
-            return GeneratorDraft.builder().answer("").build();
+            return GeneratorDraft.builder().answerItems(List.of()).build();
         }
     }
 
-    private List<GeneratorDraft.Citation> parseCitations(JsonNode citationsNode) {
-        List<GeneratorDraft.Citation> citations = new java.util.ArrayList<>();
-        if (citationsNode == null || citationsNode.isMissingNode() || !citationsNode.isArray()) {
-            return citations;
+    private List<GeneratorDraft.AnswerItem> parseAnswerItems(JsonNode node) {
+        List<GeneratorDraft.AnswerItem> items = new ArrayList<>();
+        if (node == null || node.isMissingNode() || !node.isArray()) {
+            return items;
         }
-        int position = 0;
-        for (JsonNode item : citationsNode) {
-            String sourceId = null;
-            String text = null;
-            if (item.isTextual() || item.isNumber()) {
-                sourceId = item.asText();
-            } else if (item.isObject()) {
-                sourceId = item.path("sourceId").asText("");
-                if (sourceId.isBlank()) {
-                    sourceId = item.path("id").asText("");
-                }
-                text = item.path("text").asText(null);
-            }
-            sourceId = normalizeSourceId(sourceId);
-            if (sourceId == null || sourceId.isBlank()) {
+
+        for (JsonNode itemNode : node) {
+            if (itemNode == null || !itemNode.isObject()) {
                 continue;
             }
-            citations.add(GeneratorDraft.Citation.builder()
-                    .sourceId(sourceId)
-                    .text(text)
-                    .position(position++)
-                    .build());
+            String text = itemNode.path("text").asText("").trim();
+            if (text.isBlank()) {
+                continue;
+            }
+            List<String> newsIds = parseNewsIds(itemNode.path("newsIds"));
+            items.add(GeneratorDraft.AnswerItem.builder().text(text).newsIds(newsIds).build());
         }
-        return citations;
+        return items;
+    }
+
+    private List<String> parseNewsIds(JsonNode node) {
+        List<String> ids = new ArrayList<>();
+        if (node == null || node.isMissingNode() || !node.isArray()) {
+            return ids;
+        }
+        for (JsonNode idNode : node) {
+            String id = idNode == null ? "" : idNode.asText("").trim();
+            if (!id.isBlank()) {
+                ids.add(id);
+            }
+        }
+        return ids;
     }
 
     private String extractJson(String raw) {
@@ -219,14 +173,10 @@ public class DraftGenerateNode {
         return null;
     }
 
-    private String normalizeSourceId(String raw) {
-        if (raw == null) {
-            return null;
+    private String truncate(String text, int maxLen) {
+        if (text == null) {
+            return "";
         }
-        String value = raw.trim();
-        if (value.startsWith("[") && value.endsWith("]") && value.length() > 2) {
-            value = value.substring(1, value.length() - 1).trim();
-        }
-        return value;
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
 }

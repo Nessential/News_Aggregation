@@ -8,10 +8,6 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 执行结果。
- * 封装执行完成后的输出数据。
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -19,6 +15,9 @@ import java.util.Map;
 public class PipelineResult {
     /** 生成的答案文本 */
     private String answer;
+
+    /** 结构化答案列表 */
+    private List<PipelineAnswerItem> answerItems;
 
     /** 候选文档 ID 列表 */
     private List<Long> candidateIds;
@@ -40,4 +39,13 @@ public class PipelineResult {
 
     /** 额外数据（扩展字段） */
     private Map<String, Object> extraData;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PipelineAnswerItem {
+        private String text;
+        private List<Long> newsIds;
+    }
 }

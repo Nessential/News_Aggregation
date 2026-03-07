@@ -286,7 +286,7 @@ public class LLMOrchestrator {
 
         if (Boolean.TRUE.equals(workflowContext.getAttributes().get("workflow.waiting"))) {
             String waitingReason = String.valueOf(workflowContext.getAttributes()
-                    .getOrDefault("workflow.waiting.reason", "需要更多输入信息"));
+                    .getOrDefault("workflow.waiting.reason", "Need more input"));
             transitionState(sessionId, turnId, currentFsmState, ConversationState.WAITING);
             return buildWaitingResponse(sessionState, turnId, waitingReason);
         }
@@ -402,7 +402,7 @@ public class LLMOrchestrator {
     }
 
     /**
-     * Planner 策略：所有非直答任务都走 Planner 规划。
+     * Planner 缂佹稒鐗滈弳鎰版晬濮橆厼顣查柡鍫濐樀濞碱亪鎯勭€靛摜鎽曞ù鐘侯嚙婵喖鏌堥崐鐔绘巢 Planner 閻熸瑥瀚崹婵嬪Υ?
      */
     private boolean shouldUsePlanner(TaskFamily taskFamily,
                                      boolean directAnswer,
@@ -488,7 +488,7 @@ public class LLMOrchestrator {
     private WorkflowDefinition buildDirectWorkflow(String taskFamily, String retrievalMode) {
         return WorkflowDefinition.builder()
                 .id("DIRECT_QA_WORKFLOW")
-                .name("直答工作流")
+                .name("Direct workflow")
                 .steps(List.of(
                         WorkflowStep.builder()
                                 .stepId("direct-generate")
@@ -504,20 +504,32 @@ public class LLMOrchestrator {
     }
 
     private PipelineResult buildPipelineResultFromWorkflow(WorkflowContext workflowContext) {
-        List<Long> candidateIds = workflowContext.getEvidence().stream()
-                .map(RetrievalResult::getArticleId)
+        List<PipelineResult.PipelineAnswerItem> answerItems =
+                extractAnswerItems(workflowContext.getAttributes().get("answerItems"));
+        List<Long> candidateIds = answerItems.stream()
+                .flatMap(item -> item.getNewsIds() == null ? java.util.stream.Stream.<Long>empty() : item.getNewsIds().stream())
                 .filter(Objects::nonNull)
                 .distinct()
                 .collect(Collectors.toList());
 
-        String answer = workflowContext.getAttributes().getOrDefault("answer", "").toString();
-        List<String> citations = extractCitations(workflowContext.getAttributes().get("citations"));
+        if (candidateIds.isEmpty()) {
+            candidateIds = workflowContext.getEvidence().stream()
+                    .map(RetrievalResult::getArticleId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+        }
+
+        String answer = answerItems.stream()
+                .map(PipelineResult.PipelineAnswerItem::getText)
+                .filter(text -> text != null && !text.isBlank())
+                .collect(Collectors.joining("\n"));
         Map<String, Object> extraData = buildExecutionObservabilityData(workflowContext);
 
         return PipelineResult.builder()
                 .answer(answer)
                 .candidateIds(candidateIds)
-                .citations(citations)
+                .answerItems(answerItems)
                 .llmCallCount(answer.isEmpty() ? 0 : 1)
                 .executionTimeMs(0L)
                 .success(true)
@@ -555,26 +567,57 @@ public class LLMOrchestrator {
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> extractCitations(Object raw) {
+    private List<PipelineResult.PipelineAnswerItem> extractAnswerItems(Object raw) {
         if (raw == null) {
             return List.of();
         }
-        if (raw instanceof List) {
-            List<Object> list = (List<Object>) raw;
-            return list.stream()
-                    .map(item -> {
-                        if (item == null) {
-                            return "";
-                        }
-                        if (item instanceof com.example.news.aggregation.llm.springai.contract.GeneratorDraft.Citation citation) {
-                            return citation.getSourceId();
-                        }
-                        return String.valueOf(item);
-                    })
-                    .filter(s -> !s.isBlank())
-                    .collect(Collectors.toList());
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
         }
-        return List.of(String.valueOf(raw));
+        List<PipelineResult.PipelineAnswerItem> items = new java.util.ArrayList<>();
+        for (Object item : list) {
+            if (item == null) {
+                continue;
+            }
+            if (item instanceof com.example.news.aggregation.llm.springai.contract.GeneratorDraft.AnswerItem answerItem) {
+                String text = answerItem.getText();
+                List<Long> newsIds = toLongIds(answerItem.getNewsIds());
+                if (text != null && !text.isBlank()) {
+                    items.add(PipelineResult.PipelineAnswerItem.builder().text(text).newsIds(newsIds).build());
+                }
+                continue;
+            }
+            if (item instanceof Map<?, ?> map) {
+                Object textObj = map.get("text");
+                String text = textObj == null ? "" : String.valueOf(textObj).trim();
+                Object idsObj = map.get("newsIds");
+                List<Long> newsIds = toLongIds(idsObj instanceof List<?> ids ? ids : List.of());
+                if (!text.isBlank()) {
+                    items.add(PipelineResult.PipelineAnswerItem.builder().text(text).newsIds(newsIds).build());
+                }
+            }
+        }
+        return items;
+    }
+
+    private List<Long> toLongIds(List<?> rawIds) {
+        if (rawIds == null || rawIds.isEmpty()) {
+            return List.of();
+        }
+        return rawIds.stream()
+                .map(id -> {
+                    if (id == null) {
+                        return null;
+                    }
+                    try {
+                        return Long.parseLong(String.valueOf(id));
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private AgentResponse buildBudgetExhaustedResponse(SessionState sessionState, String turnId) {
@@ -583,7 +626,7 @@ public class LLMOrchestrator {
                 .turnId(turnId)
                 .turnStatus(TurnStatus.FAILED.name())
                 .errorCode("BUDGET_EXHAUSTED")
-                .answer("抱歉，当前会话预算已耗尽，请创建新会话后继续。")
+                .answer("Budget exhausted. Please create a new session.")
                 .timestamp(LocalDateTime.now())
                 .metadata(AgentResponse.ResponseMetadata.builder().remainingBudget(0).build())
                 .build();
@@ -594,7 +637,7 @@ public class LLMOrchestrator {
                 .sessionId(sessionState.getSessionId())
                 .turnId(turnId)
                 .turnStatus(TurnStatus.DONE.name())
-                .answer("我需要更多信息才能继续回答。")
+                .answer("I need more information to continue.")
                 .needsClarification(true)
                 .clarificationPrompt(routerResult.getClarificationQuestion())
                 .timestamp(LocalDateTime.now())
@@ -616,7 +659,7 @@ public class LLMOrchestrator {
         }
         if (RunStatus.WAITING.name().equals(runStatus)) {
             String waitingReason = run.getErrorCode() == null || run.getErrorCode().isBlank()
-                    ? "需要更多输入信息"
+                    ? "Need more input"
                     : run.getErrorCode();
             log.info("[turn] 复用WAITING run，直接返回等待状态|sessionId={} |turnId={} |runId={} |reason={}",
                     sessionState.getSessionId(), turnId, run.getRunId(), waitingReason);

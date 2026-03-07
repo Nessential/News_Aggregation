@@ -5,8 +5,6 @@ import com.example.news.aggregation.llm.springai.state.GeneratorState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
-
 /**
  * 质量检查节点
  * 根据评分与引用情况决定是否重试
@@ -30,23 +28,28 @@ public class QualityCheckNode {
         }
 
         GeneratorDraft draft = state.getDraft();
-        if (draft == null) {
-            state.setValidated(false);
-            return state;
-        }
 
         double score = state.getQualityScore() != null ? state.getQualityScore() : 0.0;
-        List<GeneratorDraft.Citation> citations = draft.getCitations();
 
-        boolean hasCitations = citations != null && !citations.isEmpty();
-        boolean pass = score >= 0.6 && hasCitations;
+        if (draft == null || draft.getAnswerItems() == null || draft.getAnswerItems().isEmpty()) {
+            return markRetryOrPass(state, score);
+        }
 
+        boolean hasLinkedNews = draft.getAnswerItems().stream()
+                .anyMatch(item -> item != null
+                        && item.getNewsIds() != null
+                        && item.getNewsIds().stream().anyMatch(id -> id != null && !id.isBlank()));
+
+        boolean pass = score >= 0.6 && hasLinkedNews;
         if (pass) {
             state.setValidated(true);
             return state;
         }
 
-        // 未通过，检查是否可重试
+        return markRetryOrPass(state, score);
+    }
+
+    private GeneratorState markRetryOrPass(GeneratorState state, double score) {
         int retryCount = state.getRetryCount();
         int maxRetries = state.getMaxRetries();
         if (retryCount < maxRetries) {
@@ -57,7 +60,6 @@ public class QualityCheckNode {
             log.warn("QualityCheckNode reached max retries, force pass. score={}", score);
             state.setValidated(true);
         }
-
         return state;
     }
 }
