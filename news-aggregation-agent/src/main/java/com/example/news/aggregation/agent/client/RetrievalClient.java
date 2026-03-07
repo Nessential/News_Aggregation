@@ -50,7 +50,7 @@ public class RetrievalClient {
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, filters);
     }
-
+//    新闻检索
     private List<RetrievalResult> post(String path, String query, int topK, Double minScore, Map<String, Object> filters) {
         String url = retrievalBaseUrl + path;
         RetrievalRequest request = RetrievalRequest.builder()
@@ -78,6 +78,7 @@ public class RetrievalClient {
                         .articleId(item.getArticleId())
                         .score(item.getScore() != null ? item.getScore() : 0.0)
                         .matchedSnippet(item.getSnippet())
+                        .fullContent(item.getFullContent())
                         .metadata(item.getMetadata())
                         .build());
             }
@@ -139,6 +140,7 @@ public class RetrievalClient {
         private Long articleId;
         private Double score;
         private String snippet;
+        private String fullContent;
         private String metadata;
     }
 }

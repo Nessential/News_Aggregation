@@ -107,6 +107,8 @@ public class NewsClient {
         private String source;
         // 发布时间(字符串)
         private String publishedAt;
+        // 图片URL
+        private String imageUrl;
     }
 
     @Data

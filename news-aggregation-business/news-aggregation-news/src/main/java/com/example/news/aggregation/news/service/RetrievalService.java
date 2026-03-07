@@ -313,6 +313,7 @@ public class RetrievalService {
         Long articleId = parseId(idObj);
         Double score = scoreObj instanceof Number ? ((Number) scoreObj).doubleValue() : 0.0;
         String snippet = null;
+        String fullContent = null;
         String metadata = null;
         if (sourceObj instanceof Map<?, ?> source) {
             Object summary = source.get("summary");
@@ -320,6 +321,8 @@ public class RetrievalService {
             Object summaryCn = source.get("summary_cn");
             Object contextCn = source.get("context_cn");
             snippet = firstNonEmpty(summary, context, summaryCn, contextCn);
+            // 优先使用中文正文作为 fullContent
+            fullContent = firstNonEmpty(contextCn, summaryCn, context, summary);
             metadata = source.toString();
             Object newsId = source.get("news_id");
             if (articleId == null) {
@@ -333,6 +336,7 @@ public class RetrievalService {
                 .articleId(articleId)
                 .score(score)
                 .snippet(snippet)
+                .fullContent(fullContent)
                 .metadata(metadata)
                 .build();
     }
@@ -347,17 +351,20 @@ public class RetrievalService {
             return null;
         }
         String snippet = null;
+        String fullContent = null;
         String metadata = null;
         Map<String, Object> payload = result.getPayload();
         if (payload != null) {
             Object content = payload.get("content");
             snippet = content != null ? String.valueOf(content) : null;
+            fullContent = snippet; // 向量检索的 content 就是正文内容
             metadata = payload.toString();
         }
         return RetrievalResultDto.builder()
                 .articleId(articleId)
                 .score((double) result.getScore())
                 .snippet(snippet)
+                .fullContent(fullContent)
                 .metadata(metadata)
                 .build();
     }

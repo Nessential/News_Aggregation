@@ -35,7 +35,28 @@ public class ActionComposer {
         log.info("[action-compose] 开始组装响应|sessionId={} |taskFamily={}", sessionId, taskFamily);
 
         try {
-            List<Candidate> candidates = buildCandidates(pipelineResult.getCandidateIds());
+            // 根据答案中引用的新闻ID构建候选列表
+            List<String> citationIds = pipelineResult.getCitations();
+            List<Candidate> candidates;
+            if (citationIds != null && !citationIds.isEmpty()) {
+                // 将字符串ID转换为Long类型
+                List<Long> citedArticleIds = citationIds.stream()
+                        .map(id -> {
+                            try {
+                                return Long.parseLong(id);
+                            } catch (NumberFormatException e) {
+                                return null;
+                            }
+                        })
+                        .filter(id -> id != null)
+                        .collect(Collectors.toList());
+                candidates = buildCandidatesByCitationIds(citedArticleIds);
+                log.info("[action-compose] 根据引用构建候选|citationCount={} |candidateCount={}", citationIds.size(), candidates.size());
+            } else {
+                // 兼容旧逻辑：使用检索返回的候选ID
+                candidates = buildCandidates(pipelineResult.getCandidateIds());
+            }
+
             Map<String, Object> extraData = pipelineResult.getExtraData();
 
             AgentResponse.ResponseMetadata metadata = AgentResponse.ResponseMetadata.builder()
@@ -101,12 +122,56 @@ public class ActionComposer {
                                 .snippet(truncate(article.getContent(), 200))
                                 .source(article.getSource())
                                 .publishedAt(article.getPublishedAt() != null ? article.getPublishedAt() : null)
+                                .imageUrl(article.getImageUrl())
                                 .build();
                     })
                     .filter(candidate -> candidate != null)
                     .collect(Collectors.toList());
         } catch (Exception e) {
             log.warn("[action-compose] 拉取候选详情失败，使用兜底候选|error={}", e.getMessage());
+            return articleIds.stream()
+                    .map(id -> Candidate.builder()
+                            .articleId(id)
+                            .title("Article " + id)
+                            .snippet("Details unavailable")
+                            .build())
+                    .collect(Collectors.toList());
+        }
+    }
+
+    /**
+     * 根据答案中引用的新闻ID构建候选列表（包含标题和图片URL）
+     */
+    private List<Candidate> buildCandidatesByCitationIds(List<Long> articleIds) {
+        if (articleIds == null || articleIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        try {
+            Map<Long, NewsClient.NewsArticleDto> articleMap = newsClient.getArticlesByIds(articleIds)
+                    .stream()
+                    .collect(Collectors.toMap(NewsClient.NewsArticleDto::getId, article -> article));
+
+            return articleIds.stream()
+                    .map(id -> {
+                        NewsClient.NewsArticleDto article = articleMap.get(id);
+                        if (article == null) {
+                            log.warn("[action-compose] 引用ID对应文章不存在|id={}", id);
+                            return null;
+                        }
+                        return Candidate.builder()
+                                .articleId(article.getId())
+                                .title(article.getTitle())
+                                .url(article.getUrl())
+                                .snippet(truncate(article.getContent(), 200))
+                                .source(article.getSource())
+                                .publishedAt(article.getPublishedAt() != null ? article.getPublishedAt() : null)
+                                .imageUrl(article.getImageUrl())
+                                .build();
+                    })
+                    .filter(candidate -> candidate != null)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("[action-compose] 根据引用拉取候选详情失败，使用兜底候选|error={}", e.getMessage());
             return articleIds.stream()
                     .map(id -> Candidate.builder()
                             .articleId(id)
