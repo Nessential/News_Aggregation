@@ -12,7 +12,7 @@ spring:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:mock-key}
       chat:
-        model: qwen3.5-flash
+        model: qwen3.5-plus
         temperature: 0.7
   data:
     redis:
@@ -188,6 +188,13 @@ app:
     fallback:
       enabled: true
       default-message: "系统当前繁忙，请稍后再试。"
+
+    chat-history:
+      enabled: true
+      max-keep-turns: 50
+      llm-prompt-turns: 5
+      retention-days: 90
+      cleanup-cron: "0 0 3 * * ?"
 
 logging:
   level:

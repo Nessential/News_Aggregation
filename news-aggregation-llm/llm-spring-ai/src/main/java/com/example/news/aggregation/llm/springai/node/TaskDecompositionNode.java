@@ -44,7 +44,6 @@ public class TaskDecompositionNode {
 
         try {
             String prompt = buildPrompt(state);
-            log.info("123");
             log.info("[task-decompose] 调用 LLM 分解任务|isReplan={}|query={}",
                     state.isReplan(), truncate(state.getQuery(), 100));
 

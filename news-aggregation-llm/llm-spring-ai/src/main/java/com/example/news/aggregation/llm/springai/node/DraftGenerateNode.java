@@ -63,7 +63,11 @@ public class DraftGenerateNode {
         }
         return evidence.stream()
                 .filter(r -> r.getContent() != null && !r.getContent().isBlank())
-                .map(r -> String.format("[%s] %s", r.getId(), r.getContent()))
+                .map(r -> {
+                    String id = r.getId() != null ? r.getId() : "";
+                    String publishedAt = r.getPublishedAt() != null ? " [" + r.getPublishedAt() + "]" : "";
+                    return String.format("[%s%s] %s", id, publishedAt, r.getContent());
+                })
                 .collect(Collectors.joining("\n\n"));
     }
 

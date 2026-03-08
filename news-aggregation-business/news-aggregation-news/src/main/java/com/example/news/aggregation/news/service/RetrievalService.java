@@ -315,6 +315,7 @@ public class RetrievalService {
         String snippet = null;
         String fullContent = null;
         String metadata = null;
+        String publishedAt = null;
         if (sourceObj instanceof Map<?, ?> source) {
             Object summary = source.get("summary");
             Object context = source.get("context");
@@ -328,6 +329,11 @@ public class RetrievalService {
             if (articleId == null) {
                 articleId = parseId(newsId);
             }
+            // 提取发布时间
+            Object pubTime = source.get("publication_time");
+            if (pubTime != null) {
+                publishedAt = convertTimestampToDate(pubTime);
+            }
         }
         if (articleId == null) {
             return null;
@@ -337,6 +343,7 @@ public class RetrievalService {
                 .score(score)
                 .snippet(snippet)
                 .fullContent(fullContent)
+                .publishedAt(publishedAt)
                 .metadata(metadata)
                 .build();
     }
@@ -353,18 +360,25 @@ public class RetrievalService {
         String snippet = null;
         String fullContent = null;
         String metadata = null;
+        String publishedAt = null;
         Map<String, Object> payload = result.getPayload();
         if (payload != null) {
             Object content = payload.get("content");
             snippet = content != null ? String.valueOf(content) : null;
             fullContent = snippet; // 向量检索的 content 就是正文内容
             metadata = payload.toString();
+            // 提取发布时间
+            Object pubTime = payload.get("published_at");
+            if (pubTime != null) {
+                publishedAt = convertTimestampToDate(pubTime);
+            }
         }
         return RetrievalResultDto.builder()
                 .articleId(articleId)
                 .score((double) result.getScore())
                 .snippet(snippet)
                 .fullContent(fullContent)
+                .publishedAt(publishedAt)
                 .metadata(metadata)
                 .build();
     }
@@ -700,6 +714,32 @@ public class RetrievalService {
             }
         }
         return null;
+    }
+
+    // 将毫秒时间戳转换为可读日期格式
+    private String convertTimestampToDate(Object timestamp) {
+        if (timestamp == null) {
+            return null;
+        }
+        try {
+            long millis;
+            if (timestamp instanceof Number) {
+                millis = ((Number) timestamp).longValue();
+            } else {
+                millis = Long.parseLong(String.valueOf(timestamp));
+            }
+            // 毫秒时间戳通常是13位，如果是10位则转为毫秒
+            if (millis < 10000000000L) {
+                millis = millis * 1000;
+            }
+            LocalDateTime dateTime = LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(millis),
+                    ZoneId.systemDefault()
+            );
+            return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception e) {
+            return String.valueOf(timestamp);
+        }
     }
 
     private String summarizeFilters(Map<String, Object> filters) {

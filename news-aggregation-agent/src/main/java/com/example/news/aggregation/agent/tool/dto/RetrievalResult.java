@@ -29,6 +29,9 @@ public class RetrievalResult {
     /** 完整内容（可选） */
     private String fullContent;
 
+    /** 新闻发布时间 */
+    private String publishedAt;
+
     /** 元数据 */
     private String metadata;
 

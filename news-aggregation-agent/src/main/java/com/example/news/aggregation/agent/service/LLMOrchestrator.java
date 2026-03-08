@@ -62,6 +62,7 @@ public class LLMOrchestrator {
     private final ExecutionEventService executionEventService;
     private final ExecutionPersistenceProperties executionPersistenceProperties;
     private final PlannerIntegrationProperties plannerIntegrationProperties;
+    private final ChatHistoryService chatHistoryService;
 
     public AgentResponse handleChat(ChatRequest request) {
         String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
@@ -75,8 +76,11 @@ public class LLMOrchestrator {
         String idempotencyKey = resolveIdempotencyKey(request, sessionId, turnId);
         request.setIdempotencyKey(idempotencyKey);
 
-        log.info("[turn] 接收请求|sessionId={} |turnId={} |idempotencyKey={} |query={}",
-                sessionId, turnId, idempotencyKey, truncate(request.getQuery(), 160));
+        log.info("[turn] 接收请求|sessionId={} |userId={} |turnId={} |idempotencyKey={} |query={}",
+                sessionId, userId, turnId, idempotencyKey, truncate(request.getQuery(), 160));
+
+        // 保存用户消息到历史记录
+        chatHistoryService.saveUserMessage(sessionId, userId, turnId, requestHash, request.getQuery());
 
         IdempotencyRecord idempotencyRecord = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
         AgentResponse replay = replayFromIdempotencyRecord(sessionId, turnId, idempotencyRecord);
@@ -117,11 +121,19 @@ public class LLMOrchestrator {
                 String errorMessage = response.getAnswer() != null ? response.getAnswer() : "turn failed";
                 turnManager.markTurnFailed(sessionId, turnId, errorCode, errorMessage);
                 turnManager.markIdempotencyFailed(sessionId, idempotencyKey, turnId, errorCode, errorMessage, response);
+
+                // 保存失败消息到历史记录
+                chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, errorMessage);
+
                 return response;
             }
 
             turnManager.markTurnDone(sessionId, turnId, response);
             turnManager.markIdempotencyDone(sessionId, idempotencyKey, turnId, response);
+
+            // 保存系统回答到历史记录
+            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, response.getAnswer());
+
             return response;
         } catch (Exception e) {
             log.error("[turn] 执行失败|sessionId={} |turnId={}", sessionId, turnId, e);
@@ -135,6 +147,10 @@ public class LLMOrchestrator {
                     .build();
             turnManager.markTurnFailed(sessionId, turnId, failed.getErrorCode(), e.getMessage());
             turnManager.markIdempotencyFailed(sessionId, idempotencyKey, turnId, failed.getErrorCode(), e.getMessage(), failed);
+
+            // 保存异常消息到历史记录
+            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, failed.getAnswer());
+
             return failed;
         } finally {
             sessionManager.releaseSessionLock(sessionId, turnId);
