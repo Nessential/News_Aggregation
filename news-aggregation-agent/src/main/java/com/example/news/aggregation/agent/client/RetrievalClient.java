@@ -79,6 +79,7 @@ public class RetrievalClient {
                         .score(item.getScore() != null ? item.getScore() : 0.0)
                         .matchedSnippet(item.getSnippet())
                         .fullContent(item.getFullContent())
+                        .publishedAt(item.getPublishedAt())
                         .metadata(item.getMetadata())
                         .build());
             }
@@ -141,6 +142,7 @@ public class RetrievalClient {
         private Double score;
         private String snippet;
         private String fullContent;
+        private String publishedAt;
         private String metadata;
     }
 }

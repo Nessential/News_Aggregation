@@ -18,6 +18,8 @@ public class RetrievalResultDto {
     private String snippet;
     // 完整正文（中文）
     private String fullContent;
+    // 新闻发布时间
+    private String publishedAt;
     // 原始元数据（序列化后的 source/payload）
     private String metadata;
 }

@@ -19,6 +19,7 @@ public class RetrievalResult {
     private String url;
     private Double score;
     private String source;
+    private String publishedAt;
     
     @Builder.Default
     private Map<String, Object> metadata = new HashMap<>();
