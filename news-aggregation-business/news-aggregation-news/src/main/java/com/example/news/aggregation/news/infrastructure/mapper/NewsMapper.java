@@ -22,4 +22,16 @@ public interface NewsMapper extends BaseMapper<News> {
     List<News> selectForTranslation(int batchSize);
 
     List<News> selectForVectorization(@Param("batchSize") int batchSize);
+
+    List<News> selectListPage(@Param("offset") long offset,
+                              @Param("pageSize") int pageSize,
+                              @Param("keyword") String keyword,
+                              @Param("source") String source,
+                              @Param("category") String category);
+
+    Long countList(@Param("keyword") String keyword,
+                   @Param("source") String source,
+                   @Param("category") String category);
+
+    News selectDetailById(@Param("id") Long id);
 }

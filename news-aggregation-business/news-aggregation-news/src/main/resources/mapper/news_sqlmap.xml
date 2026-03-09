@@ -52,7 +52,7 @@
 
 
 <!--    查找翻译完成，但是还没向量化的新闻数据-->
-    <select id="selectForVectorization" resultMap="resultNewsMap">
+ <select id="selectForVectorization" resultMap="resultNewsMap">
       SELECT * FROM news
     WHERE deleted = 0
       AND translation_status = 1
@@ -61,5 +61,56 @@
      LIMIT #{batchSize}
 
  </select>
+
+    <select id="selectListPage" resultMap="resultNewsMap">
+        SELECT * FROM news
+        <where>
+            deleted = 0
+            <if test="keyword != null and keyword != ''">
+                AND (
+                title LIKE CONCAT('%', #{keyword}, '%')
+                OR summary LIKE CONCAT('%', #{keyword}, '%')
+                OR title_cn LIKE CONCAT('%', #{keyword}, '%')
+                OR summary_cn LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+            <if test="source != null and source != ''">
+                AND source = #{source}
+            </if>
+            <if test="category != null and category != ''">
+                AND category = #{category}
+            </if>
+        </where>
+        ORDER BY publication_time DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countList" resultType="java.lang.Long">
+        SELECT COUNT(1) FROM news
+        <where>
+            deleted = 0
+            <if test="keyword != null and keyword != ''">
+                AND (
+                title LIKE CONCAT('%', #{keyword}, '%')
+                OR summary LIKE CONCAT('%', #{keyword}, '%')
+                OR title_cn LIKE CONCAT('%', #{keyword}, '%')
+                OR summary_cn LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+            <if test="source != null and source != ''">
+                AND source = #{source}
+            </if>
+            <if test="category != null and category != ''">
+                AND category = #{category}
+            </if>
+        </where>
+    </select>
+
+    <select id="selectDetailById" resultMap="resultNewsMap">
+        SELECT * FROM news
+        WHERE id = #{id}
+          AND deleted = 0
+        LIMIT 1
+    </select>
 
 </mapper>

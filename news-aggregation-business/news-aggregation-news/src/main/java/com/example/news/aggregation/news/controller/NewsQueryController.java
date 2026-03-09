@@ -1,8 +1,6 @@
 package com.example.news.aggregation.news.controller;
 
 import com.example.news.aggregation.news.domain.entity.News;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.news.aggregation.news.dto.ArticlesResponse;
 import com.example.news.aggregation.news.dto.IdsRequest;
 import com.example.news.aggregation.news.dto.NewsArticleDto;
@@ -54,31 +52,20 @@ public class NewsQueryController {
             @RequestParam(required = false) String category
     ) {
         boolean preferZh = isPreferZh(lang);
+        int safePage = Math.max(page, 1);
+        int safePageSize = Math.max(pageSize, 1);
+        long offset = (long) (safePage - 1) * safePageSize;
 
-        QueryWrapper<News> wrapper = new QueryWrapper<>();
-        if (keyword != null && !keyword.isBlank()) {
-            wrapper.and(w -> w.like("title", keyword)
-                    .or().like("summary", keyword)
-                    .or().like("title_cn", keyword)
-                    .or().like("summary_cn", keyword));
-        }
-        if (source != null && !source.isBlank()) {
-            wrapper.eq("source", source);
-        }
-        if (category != null && !category.isBlank()) {
-            wrapper.eq("category", category);
-        }
-        wrapper.orderByDesc("publication_time");
-
-        Page<News> pageResult = newsMapper.selectPage(new Page<>(page, pageSize), wrapper);
-        List<NewsListItemDto> items = pageResult.getRecords().stream()
+        List<News> records = newsMapper.selectListPage(offset, safePageSize, keyword, source, category);
+        Long total = newsMapper.countList(keyword, source, category);
+        List<NewsListItemDto> items = records.stream()
                 .map(news -> toListItemDto(news, preferZh, includeAltLang))
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(NewsListResponse.builder()
-                .total(pageResult.getTotal())
-                .page((int) pageResult.getCurrent())
-                .pageSize((int) pageResult.getSize())
+                .total(total == null ? 0L : total)
+                .page(safePage)
+                .pageSize(safePageSize)
                 .items(items)
                 .build());
     }
@@ -91,7 +78,7 @@ public class NewsQueryController {
             @PathVariable Long id,
             @RequestParam(required = false) String lang
     ) {
-        News news = newsMapper.selectById(id);
+        News news = newsMapper.selectDetailById(id);
         if (news == null) {
             return ResponseEntity.notFound().build();
         }
