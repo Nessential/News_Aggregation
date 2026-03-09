@@ -1,9 +1,9 @@
-spring:
+﻿spring:
   application:
     name: news-aggregation-app
   config:
     import:
-      # 允许从 .env 加载 key=value 配置（按工作目录兼容多路径）
+      # 鍏佽浠?.env 鍔犺浇 key=value 閰嶇疆锛堟寜宸ヤ綔鐩綍鍏煎澶氳矾寰勶級
       - optional:file:.env[.properties]
       - optional:file:../.env[.properties]
       - optional:file:../../.env[.properties]
@@ -20,7 +20,12 @@ spring:
 server:
   port: 8080
 
-# MyBatis配置
+
+app:
+  cors:
+    enabled: ${APP_CORS_ENABLED:false}
+
+# MyBatis閰嶇疆
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
 
@@ -38,3 +43,4 @@ dubbo:
     filter: userContextProvider
   consumer:
     check: false
+

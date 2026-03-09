@@ -1,10 +1,12 @@
 package com.example.news.aggregation.app.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
+@ConditionalOnProperty(prefix = "app.cors", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class CorsConfig implements WebMvcConfigurer {
 
     @Override
