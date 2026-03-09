@@ -23,6 +23,7 @@
         <module>news-aggregation-vector</module>
         <module>news-aggregation-embedding</module>
         <module>news-aggregation-web</module>
+        <module>news-aggregation-gateway</module>
     </modules>
 
     <properties>

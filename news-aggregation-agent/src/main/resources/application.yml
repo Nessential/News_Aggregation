@@ -55,6 +55,12 @@ xxl:
       logretentiondays: 30
 
 app:
+  cors:
+    enabled: ${APP_CORS_ENABLED:false}
+  auth:
+    enforce: ${APP_AUTH_ENFORCE:true}
+    user-id-header: ${APP_AUTH_USER_ID_HEADER:X-User-Id}
+    protected-path-prefix: /api/agent
   rpc:
     enabled: ${APP_RPC_ENABLED:true}
   news:
@@ -221,6 +227,7 @@ dubbo:
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
   consumer:
+    filter: userContextConsumer
     check: false
     timeout: 8000
     retries: 0

@@ -10,6 +10,7 @@ import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.service.ExecutionDispatchService;
 import com.example.news.aggregation.agent.execution.service.ExecutionResumeService;
 import com.example.news.aggregation.agent.execution.service.ExecutionRunService;
+import com.example.news.aggregation.agent.security.UserContextHolder;
 import com.example.news.aggregation.agent.service.LLMOrchestrator;
 import com.example.news.aggregation.agent.service.SessionManager;
 import lombok.RequiredArgsConstructor;
@@ -28,9 +29,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * 对话与会话相关接口。
- */
 @Slf4j
 @RestController
 @RequestMapping("/api/agent")
@@ -43,43 +41,67 @@ public class ChatController {
     private final ExecutionRunService executionRunService;
     private final ExecutionDispatchService executionDispatchService;
 
-    /**
-     * 对话入口。
-     */
     @PostMapping("/chat")
     public ResponseEntity<AgentResponse> chat(@RequestBody ChatRequest request) {
-        log.info("[api-step-01] 收到对话请求|sessionId={} |turnId={} |query={}",
+        log.info("[api-chat] request received|sessionId={} |turnId={} |query={}",
                 request.getSessionId(), request.getTurnId(), truncate(request.getQuery(), 120));
         try {
-            if (request.getUserId() == null || request.getUserId().isBlank()) {
-                request.setUserId("anonymous");
+            String currentUserId = requireCurrentUserId();
+            if (currentUserId == null) {
+                log.warn("[api-chat] unauthorized|sessionId={} |turnId={} |reason=missing_user_context",
+                        request.getSessionId(), request.getTurnId());
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(buildErrorResponse(
+                        request.getSessionId(),
+                        request.getTurnId(),
+                        "Authentication required",
+                        "UNAUTHORIZED"
+                ));
             }
 
+            if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
+                SessionState existing = sessionManager.getSession(request.getSessionId());
+                if (existing == null) {
+                    log.warn("[api-chat] session not found|sessionId={} |turnId={} |userId={}",
+                            request.getSessionId(), request.getTurnId(), currentUserId);
+                    return ResponseEntity.status(HttpStatus.NOT_FOUND).body(buildErrorResponse(
+                            request.getSessionId(),
+                            request.getTurnId(),
+                            "Session not found",
+                            "SESSION_NOT_FOUND"
+                    ));
+                }
+                if (!currentUserId.equals(existing.getUserId())) {
+                    log.warn("[api-chat] forbidden session access|sessionId={} |turnId={} |ownerUserId={} |requestUserId={}",
+                            request.getSessionId(), request.getTurnId(), existing.getUserId(), currentUserId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(buildErrorResponse(
+                            request.getSessionId(),
+                            request.getTurnId(),
+                            "Session does not belong to current user",
+                            "SESSION_FORBIDDEN"
+                    ));
+                }
+            }
+
+            request.setUserId(currentUserId);
             AgentResponse response = llmOrchestrator.handleChat(request);
             if ("SESSION_BUSY".equals(response.getErrorCode())) {
-                log.warn("[api-step-02] 会话并发冲突|sessionId={} |turnId={} |runningTurnId={}",
-                        response.getSessionId(), response.getTurnId(), response.getRunningTurnId());
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
             }
             if ("IDEMPOTENCY_IN_PROGRESS".equals(response.getErrorCode())) {
-                log.info("[api-step-03] 幂等请求处理中|sessionId={} |turnId={} |runningTurnId={}",
-                        response.getSessionId(), response.getTurnId(), response.getRunningTurnId());
                 return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("[api-step-xx] 对话请求失败", e);
+            log.error("[api-chat] request failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(buildErrorResponse(
                     request.getSessionId(),
                     request.getTurnId(),
-                    "内部错误: " + e.getMessage()
+                    "Internal error: " + e.getMessage(),
+                    "INTERNAL_ERROR"
             ));
         }
     }
 
-    /**
-     * 恢复 WAITING 状态的执行步骤。
-     */
     @PostMapping("/execution/run/{runId}/resume")
     public ResponseEntity<Map<String, Object>> resumeExecution(@PathVariable String runId,
                                                                @RequestBody(required = false) ExecutionResumeRequest request) {
@@ -100,7 +122,6 @@ public class ChatController {
         Map<String, Object> resumeInput = request == null ? null : request.getResumeInput();
         boolean resumed = executionResumeService.resumeWaitingStep(runId, stepId, resumeInput);
         if (!resumed) {
-            log.warn("[api-step-resume] 恢复失败|runId={} |stepId={}", runId, stepId);
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("success", false, "errorCode", "RESUME_CONFLICT", "runId", runId, "stepId", stepId));
         }
@@ -114,12 +135,10 @@ public class ChatController {
                     "resume dispatch failed"
             );
             executionRunService.markWaiting(runId, stepId, "resume_dispatch_failed", "resume dispatch failed");
-            log.error("[api-step-resume] 恢复调度失败，已回滚到WAITING|runId={} |stepId={}", runId, stepId);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("success", false, "errorCode", "RESUME_DISPATCH_FAILED", "runId", runId, "stepId", stepId));
         }
 
-        log.info("[api-step-resume] 恢复成功|runId={} |stepId={}", runId, stepId);
         ExecutionRunEntity latest = executionRunService.findByRunId(runId);
         Map<String, Object> body = new HashMap<>();
         body.put("success", true);
@@ -129,12 +148,14 @@ public class ChatController {
         return ResponseEntity.ok(body);
     }
 
-    /**
-     * 创建会话。
-     */
     @PostMapping("/session")
     public ResponseEntity<SessionResponse> createSession(@RequestBody CreateSessionRequest request) {
-        String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
+        String userId = requireCurrentUserId();
+        if (userId == null) {
+            log.warn("[api-session-create] unauthorized|reason=missing_user_context");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
         SessionState sessionState = sessionManager.createSession(userId);
         return ResponseEntity.ok(SessionResponse.builder()
                 .sessionId(sessionState.getSessionId())
@@ -143,34 +164,66 @@ public class ChatController {
                 .build());
     }
 
-    /**
-     * 查询会话状态。
-     */
     @GetMapping("/session/{sessionId}")
     public ResponseEntity<SessionState> getSession(@PathVariable String sessionId) {
+        String userId = requireCurrentUserId();
+        if (userId == null) {
+            log.warn("[api-session-get] unauthorized|sessionId={} |reason=missing_user_context", sessionId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
         SessionState sessionState = sessionManager.getSession(sessionId);
         if (sessionState == null) {
+            log.warn("[api-session-get] session not found|sessionId={} |userId={}", sessionId, userId);
             return ResponseEntity.notFound().build();
+        }
+        if (!userId.equals(sessionState.getUserId())) {
+            log.warn("[api-session-get] forbidden|sessionId={} |ownerUserId={} |requestUserId={}",
+                    sessionId, sessionState.getUserId(), userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         return ResponseEntity.ok(sessionState);
     }
 
-    /**
-     * 删除会话。
-     */
     @DeleteMapping("/session/{sessionId}")
     public ResponseEntity<Void> deleteSession(@PathVariable String sessionId) {
+        String userId = requireCurrentUserId();
+        if (userId == null) {
+            log.warn("[api-session-delete] unauthorized|sessionId={} |reason=missing_user_context", sessionId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        SessionState sessionState = sessionManager.getSession(sessionId);
+        if (sessionState == null) {
+            log.warn("[api-session-delete] session not found|sessionId={} |userId={}", sessionId, userId);
+            return ResponseEntity.notFound().build();
+        }
+        if (!userId.equals(sessionState.getUserId())) {
+            log.warn("[api-session-delete] forbidden|sessionId={} |ownerUserId={} |requestUserId={}",
+                    sessionId, sessionState.getUserId(), userId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         sessionManager.deleteSession(sessionId);
         return ResponseEntity.noContent().build();
     }
 
-    private AgentResponse buildErrorResponse(String sessionId, String turnId, String errorMessage) {
+    private String requireCurrentUserId() {
+        String userId = UserContextHolder.getUserId();
+        if (userId == null) {
+            return null;
+        }
+        String trimmed = userId.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private AgentResponse buildErrorResponse(String sessionId, String turnId, String errorMessage, String errorCode) {
         return AgentResponse.builder()
                 .sessionId(sessionId)
                 .turnId(turnId)
                 .turnStatus("FAILED")
-                .errorCode("INTERNAL_ERROR")
-                .answer("请求处理失败：" + errorMessage)
+                .errorCode(errorCode)
+                .answer(errorMessage)
                 .timestamp(LocalDateTime.now())
                 .build();
     }

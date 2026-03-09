@@ -115,6 +115,13 @@
             <artifactId>dypnsapi20170525</artifactId>
             <version>2.0.0</version>
         </dependency>
+
+        <!-- Hutool工具库（用于AES加密生成token） -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-crypto</artifactId>
+            <version>5.8.25</version>
+        </dependency>
     </dependencies>
 
     <build>

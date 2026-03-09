@@ -10,6 +10,7 @@ import com.example.news.aggregation.news.exception.UserAuthErrorCode;
 import com.example.news.aggregation.news.infrastructure.mapper.SmsSendRecordMapper;
 import com.example.news.aggregation.news.infrastructure.mapper.UserAccountMapper;
 import com.example.news.aggregation.news.service.SmsGateway;
+import com.example.news.aggregation.news.service.TokenService;
 import com.example.news.aggregation.news.service.UserAuthService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class UserAuthServiceImpl implements UserAuthService {
     private final RedissonClient redissonClient;
     private final SmsGateway smsGateway;
     private final SmsAuthProperties properties;
+    private final TokenService tokenService;
 
     @Override
     public SmsSendCodeResponse sendSmsCode(String phone) {
@@ -132,12 +134,16 @@ public class UserAuthServiceImpl implements UserAuthService {
         // 登录成功后清理验证码上下文，避免重复使用。
         redisTemplate.delete(buildSmsOutIdKey(phone));
         redisTemplate.delete(buildSmsMockCodeKey(phone));
+        // 生成登录Token
+        String token = tokenService.generateToken(user.getId());
+
         return SmsLoginResponse.builder()
                 .userId(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .phone(user.getPhone())
                 .newUser(isNewUser)
+                .token(token)
                 .build();
     }
 
