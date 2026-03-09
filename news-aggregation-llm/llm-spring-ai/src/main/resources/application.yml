@@ -113,5 +113,7 @@ dubbo:
     address: nacos://${NACOS_ADDR:localhost:8848}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
+  provider:
+    filter: userContextProvider
   consumer:
     check: false

@@ -65,7 +65,10 @@ public class LLMOrchestrator {
     private final ChatHistoryService chatHistoryService;
 
     public AgentResponse handleChat(ChatRequest request) {
-        String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
+        String userId = request.getUserId() == null ? null : request.getUserId().trim();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("UNAUTHORIZED_USER");
+        }
         SessionState sessionState = getOrCreateSession(request, userId);
         String sessionId = sessionState.getSessionId();
         String turnId = resolveTurnId(request);
@@ -388,8 +391,12 @@ public class LLMOrchestrator {
         if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
             SessionState existing = sessionManager.getSession(request.getSessionId());
             if (existing != null) {
+                if (!Objects.equals(existing.getUserId(), userId)) {
+                    throw new SecurityException("SESSION_FORBIDDEN");
+                }
                 return existing;
             }
+            throw new IllegalArgumentException("SESSION_NOT_FOUND");
         }
         return sessionManager.createSession(userId);
     }
