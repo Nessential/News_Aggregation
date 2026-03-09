@@ -19,6 +19,7 @@
         <result column="context_cn" property="context_cn" jdbcType="LONGVARCHAR"/>
         <result column="title_cn" property="title_cn" jdbcType="VARCHAR"/>
         <result column="summary_cn" property="summary_cn" jdbcType="LONGVARCHAR"/>
+        <result column="category_id" property="category_id" jdbcType="BIGINT"/>
 
         <result column="content_status" property="content_status" jdbcType="TINYINT"/>
         <result column="translation_status" property="translation_status" jdbcType="TINYINT"/>
@@ -77,8 +78,8 @@
             <if test="source != null and source != ''">
                 AND source = #{source}
             </if>
-            <if test="category != null and category != ''">
-                AND category = #{category}
+            <if test="categoryId != null">
+                AND category_id = #{categoryId}
             </if>
         </where>
         ORDER BY publication_time DESC
@@ -100,8 +101,8 @@
             <if test="source != null and source != ''">
                 AND source = #{source}
             </if>
-            <if test="category != null and category != ''">
-                AND category = #{category}
+            <if test="categoryId != null">
+                AND category_id = #{categoryId}
             </if>
         </where>
     </select>

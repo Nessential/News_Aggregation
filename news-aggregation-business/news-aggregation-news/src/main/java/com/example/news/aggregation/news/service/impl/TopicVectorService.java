@@ -11,10 +11,8 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 
-
 /**
- * Topic 向量生成服务
- * 用于 Story 归簇和事件匹配
+ * Topic 向量生成服务，用于 Story 聚合与事件匹配。
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -27,25 +25,15 @@ public class TopicVectorService {
     private static final String COLLECTION_TOPIC_EN = "news_topic_en";
     private static final String COLLECTION_TOPIC_ZH = "news_topic_zh";
 
-
-    public void vectorizeTopicEn(News news){
-
-        String topicText = buildTopicText(news,"en");
-
+    public void vectorizeTopicEn(News news) {
+        String topicText = buildTopicText(news, "en");
         if (topicText == null || topicText.isEmpty()) {
-            log.warn("topicText 为空，向量化失败，news_id:{}",news.getId());
+            log.warn("topicText 为空，向量化跳过，newsId={}", news.getId());
             return;
         }
-//        向量化
-        float[] embedding = embeddingService.embed(topicText);
 
-//      装载元数据一起存入向量数据库
-        Map<String,Object> payload = new HashMap<>();
-        payload.put("news_id", news.getId());
-        payload.put("canonical_id", news.getCanonical_id());
-        payload.put("published_at", news.getPublication_time());
-        payload.put("category", news.getCategory());
-        payload.put("source", news.getSource());
+        float[] embedding = embeddingService.embed(topicText);
+        Map<String, Object> payload = buildPayload(news);
 
         VectorPoint point = VectorPoint.builder()
                 .id("topic_" + news.getId() + "_en")
@@ -54,9 +42,7 @@ public class TopicVectorService {
                 .build();
 
         vectorStoreService.upsert(COLLECTION_TOPIC_EN, java.util.List.of(point));
-
-        log.info("Topic向量生成完成: newsId={}, lang=en", news.getId());
-
+        log.info("Topic 向量生成完成: newsId={}, lang=en", news.getId());
     }
 
     public void vectorizeTopicZh(News news) {
@@ -66,14 +52,7 @@ public class TopicVectorService {
         }
 
         float[] embedding = embeddingService.embed(topicText);
-
-        // 构建 Payload（只存储标识和过滤字段）
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("news_id", news.getId());
-        payload.put("canonical_id", news.getCanonical_id());
-        payload.put("published_at", news.getPublication_time());
-        payload.put("category", news.getCategory());
-        payload.put("source", news.getSource());
+        Map<String, Object> payload = buildPayload(news);
 
         VectorPoint point = VectorPoint.builder()
                 .id("topic_" + news.getId() + "_zh")
@@ -82,35 +61,40 @@ public class TopicVectorService {
                 .build();
 
         vectorStoreService.upsert(COLLECTION_TOPIC_ZH, java.util.List.of(point));
-
-        log.debug("Topic向量生成完成: newsId={}, lang=zh", news.getId());
+        log.debug("Topic 向量生成完成: newsId={}, lang=zh", news.getId());
     }
 
+    private Map<String, Object> buildPayload(News news) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("news_id", news.getId());
+        payload.put("canonical_id", news.getCanonical_id());
+        payload.put("published_at", news.getPublication_time());
+        payload.put("category_id", news.getCategory_id());
+        payload.put("source", news.getSource());
+        return payload;
+    }
 
-    /**
-     * 组装标题和摘要
-     * @param news
-     * @param language
-     * @return
-     */
-    private String buildTopicText(News news,String language){
+    private String buildTopicText(News news, String language) {
         StringBuilder sb = new StringBuilder();
 
-        if(language.equals("zh")){
+        if ("zh".equals(language)) {
             if (news.getTitle_cn() != null && !news.getTitle_cn().isEmpty()) {
                 sb.append(news.getTitle_cn());
             }
             if (news.getSummary_cn() != null && !news.getSummary_cn().isEmpty()) {
-                if (!sb.isEmpty()) sb.append(" ");
+                if (!sb.isEmpty()) {
+                    sb.append(" ");
+                }
                 sb.append(news.getSummary_cn());
             }
-        }
-        else {
+        } else {
             if (news.getTitle() != null && !news.getTitle().isEmpty()) {
                 sb.append(news.getTitle());
             }
             if (news.getSummary() != null && !news.getSummary().isEmpty()) {
-                if (!sb.isEmpty()) sb.append(" ");
+                if (!sb.isEmpty()) {
+                    sb.append(" ");
+                }
                 sb.append(news.getSummary());
             }
         }
