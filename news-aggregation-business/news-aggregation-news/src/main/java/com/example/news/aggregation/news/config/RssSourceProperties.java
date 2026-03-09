@@ -15,6 +15,10 @@ import java.util.List;
 public class RssSourceProperties {
 
     private List<RssSource> sources;
+    /**
+     * URL 过滤关键词，命中则跳过抓取（不入库）
+     */
+    private List<String> skipUrlKeywords;
 
     @Getter
     @Setter
