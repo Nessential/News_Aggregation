@@ -4,7 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 /**
- * 新闻详情 DTO
+ * 新闻详情 DTO。
  */
 @Data
 @Builder
@@ -25,4 +25,6 @@ public class NewsDetailDto {
     private String source;
     private String publishedAt;
     private Long publicationTime;
+    private Long categoryId;
+    private String categoryName;
 }

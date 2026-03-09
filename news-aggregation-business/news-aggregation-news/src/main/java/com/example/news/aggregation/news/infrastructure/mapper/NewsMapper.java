@@ -27,11 +27,11 @@ public interface NewsMapper extends BaseMapper<News> {
                               @Param("pageSize") int pageSize,
                               @Param("keyword") String keyword,
                               @Param("source") String source,
-                              @Param("category") String category);
+                              @Param("categoryId") Long categoryId);
 
     Long countList(@Param("keyword") String keyword,
                    @Param("source") String source,
-                   @Param("category") String category);
+                   @Param("categoryId") Long categoryId);
 
     News selectDetailById(@Param("id") Long id);
 }

@@ -1,9 +1,12 @@
 package com.example.news.aggregation.news.service.impl;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.news.aggregation.news.config.RssSourceProperties;
 import com.example.news.aggregation.news.domain.entity.News;
+import com.example.news.aggregation.news.domain.entity.NewsCategory;
 import com.example.news.aggregation.news.exception.NewsException;
 import com.example.news.aggregation.news.infrastructure.content.ContentExtractor;
+import com.example.news.aggregation.news.infrastructure.mapper.NewsCategoryMapper;
 import com.example.news.aggregation.news.infrastructure.mapper.NewsMapper;
 import com.example.news.aggregation.news.infrastructure.rss.RssParser;
 import com.example.news.aggregation.news.service.RssFetchService;
@@ -11,6 +14,7 @@ import com.example.news.aggregation.storage.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,6 +28,7 @@ public class RssFetchServiceImpl implements RssFetchService {
     private final RssSourceProperties rssSourceProperties;
     private final RssParser rssParser;
     private final NewsMapper newsMapper;
+    private final NewsCategoryMapper newsCategoryMapper;
     private final ContentExtractor contentExtractor;
 
     @Autowired
@@ -32,7 +37,6 @@ public class RssFetchServiceImpl implements RssFetchService {
     @Override
     public void fetchAndSaveNews() {
         List<RssSourceProperties.RssSource> sources = rssSourceProperties.getSources();
-
         if (sources == null || sources.isEmpty()) {
             log.warn("未配置 RSS 源");
             return;
@@ -57,17 +61,19 @@ public class RssFetchServiceImpl implements RssFetchService {
 
     @Override
     public void selectForTranslate() {
-        // no-op
+        // 保留空实现
     }
 
     private int fetchSingleSource(RssSourceProperties.RssSource source) {
         log.info("开始抓取 RSS 源: {}", source.getName());
         List<News> newsList = rssParser.parse(source.getUrl(), source.getName(), source.getCategory());
 
+        Long categoryId = resolveCategoryId(source.getCategory());
         int saved = 0;
+
         for (News news : newsList) {
             try {
-                // URL 命中过滤关键词时，直接跳过（不抓正文，不入库）
+                // URL 命中过滤关键词时直接跳过（不抓正文、不入库）
                 if (shouldSkipByUrl(news.getLink())) {
                     log.info("URL 命中过滤关键词，跳过抓取: {}", news.getLink());
                     continue;
@@ -79,6 +85,9 @@ public class RssFetchServiceImpl implements RssFetchService {
                     log.debug("新闻已存在，跳过: {}", news.getLink());
                     continue;
                 }
+
+                news.setCategory_id(categoryId);
+                news.setCategory(source.getCategory());
 
                 // 保存图片
                 String originImageUrl = news.getImage_url();
@@ -102,7 +111,40 @@ public class RssFetchServiceImpl implements RssFetchService {
     }
 
     /**
-     * 抓取新闻正文内容
+     * 解析分类 ID，不存在时自动创建分类。
+     */
+    private Long resolveCategoryId(String categoryName) {
+        if (categoryName == null || categoryName.isBlank()) {
+            return null;
+        }
+
+        NewsCategory existed = newsCategoryMapper.selectByName(categoryName);
+        if (existed != null) {
+            return existed.getId();
+        }
+
+        try {
+            NewsCategory category = new NewsCategory();
+            category.setName(categoryName);
+            newsCategoryMapper.insert(category);
+            log.info("自动创建新闻分类成功: name={}, id={}", categoryName, category.getId());
+            return category.getId();
+        } catch (DuplicateKeyException ex) {
+            // 并发场景下可能由其他线程先创建，回查即可
+            NewsCategory category = newsCategoryMapper.selectOne(
+                    Wrappers.<NewsCategory>lambdaQuery()
+                            .eq(NewsCategory::getName, categoryName)
+                            .last("limit 1")
+            );
+            if (category != null) {
+                return category.getId();
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * 抓取新闻正文内容。
      */
     private void fetchNewsContent(News news) {
         try {
@@ -125,6 +167,7 @@ public class RssFetchServiceImpl implements RssFetchService {
         if (link == null || link.isBlank()) {
             return false;
         }
+
         List<String> keywords = rssSourceProperties.getSkipUrlKeywords();
         if (keywords == null || keywords.isEmpty()) {
             return false;

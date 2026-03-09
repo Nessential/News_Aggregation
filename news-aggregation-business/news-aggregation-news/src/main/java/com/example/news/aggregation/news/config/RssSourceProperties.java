@@ -1,6 +1,5 @@
 package com.example.news.aggregation.news.config;
 
-
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -14,28 +13,22 @@ import java.util.List;
 @ConfigurationProperties(prefix = "news.rss")
 public class RssSourceProperties {
 
+    /** RSS 源列表 */
     private List<RssSource> sources;
-    /**
-     * URL 过滤关键词，命中则跳过抓取（不入库）
-     */
+
+    /** URL 过滤关键词，命中后跳过抓取 */
     private List<String> skipUrlKeywords;
 
     @Getter
     @Setter
     public static class RssSource {
-        /**
-         * 源名称
-         */
+        /** 源名称 */
         private String name;
 
-        /**
-         * RSS 地址
-         */
+        /** RSS 地址 */
         private String url;
 
-        /**
-         * 分类
-         */
+        /** 分类名称 */
         private String category;
     }
 }

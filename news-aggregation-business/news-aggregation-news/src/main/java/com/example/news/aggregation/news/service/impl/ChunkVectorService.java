@@ -1,6 +1,5 @@
 package com.example.news.aggregation.news.service.impl;
 
-
 import com.example.news.aggregation.embedding.chunker.TextChunker;
 import com.example.news.aggregation.embedding.model.TextChunk;
 import com.example.news.aggregation.embedding.service.EmbeddingService;
@@ -46,7 +45,7 @@ public class ChunkVectorService {
             payload.put("chunk_index", chunk.getIndex());
             payload.put("canonical_id", news.getCanonical_id());
             payload.put("published_at", news.getPublication_time());
-            payload.put("category", news.getCategory());
+            payload.put("category_id", news.getCategory_id());
             payload.put("source", news.getSource());
 
             VectorPoint point = VectorPoint.builder()
@@ -54,14 +53,12 @@ public class ChunkVectorService {
                     .vector(embedding)
                     .payload(payload)
                     .build();
-
             points.add(point);
         }
 
         if (!points.isEmpty()) {
             vectorStoreService.upsert(COLLECTION_CHUNKS_EN, points);
-            log.debug("Chunk向量生成完成: newsId={}, lang=en, chunks={}",
-                    news.getId(), points.size());
+            log.debug("Chunk 向量生成完成: newsId={}, lang=en, chunks={}", news.getId(), points.size());
         }
     }
 
@@ -83,7 +80,7 @@ public class ChunkVectorService {
             payload.put("chunk_index", chunk.getIndex());
             payload.put("canonical_id", news.getCanonical_id());
             payload.put("published_at", news.getPublication_time());
-            payload.put("category", news.getCategory());
+            payload.put("category_id", news.getCategory_id());
             payload.put("source", news.getSource());
 
             VectorPoint point = VectorPoint.builder()
@@ -91,14 +88,12 @@ public class ChunkVectorService {
                     .vector(embedding)
                     .payload(payload)
                     .build();
-
             points.add(point);
         }
 
         if (!points.isEmpty()) {
             vectorStoreService.upsert(COLLECTION_CHUNKS_ZH, points);
-            log.debug("Chunk向量生成完成: newsId={}, lang=zh, chunks={}",
-                    news.getId(), points.size());
+            log.debug("Chunk 向量生成完成: newsId={}, lang=zh, chunks={}", news.getId(), points.size());
         }
     }
 
@@ -120,7 +115,7 @@ public class ChunkVectorService {
 
     private void appendIfNotEmpty(StringBuilder sb, String text) {
         if (text != null && !text.isEmpty()) {
-            if (sb.length() > 0) {
+            if (!sb.isEmpty()) {
                 sb.append("\n\n");
             }
             sb.append(text);
