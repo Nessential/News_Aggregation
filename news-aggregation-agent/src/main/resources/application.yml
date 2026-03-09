@@ -55,6 +55,8 @@ xxl:
       logretentiondays: 30
 
 app:
+  rpc:
+    enabled: ${APP_RPC_ENABLED:true}
   news:
     retrieval:
       base-url: http://localhost:8080
@@ -201,5 +203,24 @@ logging:
     com.example.news.aggregation.agent: DEBUG
     com.example.news.aggregation.llm: DEBUG
     com.example.news.aggregation.news: INFO
+  charset:
+    console: UTF-8
+    file: UTF-8
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+dubbo:
+  application:
+    name: ${spring.application.name}
+  protocol:
+    name: tri
+    port: -1
+  registry:
+    address: nacos://${NACOS_ADDR:localhost:8848}
+    parameters:
+      namespace: ${NACOS_NAMESPACE:news-agent}
+  consumer:
+    check: false
+    timeout: 8000
+    retries: 0

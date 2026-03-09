@@ -1,12 +1,15 @@
 package com.example.news.aggregation.agent.client;
 
 import com.example.news.aggregation.agent.tool.dto.RetrievalResult;
+import com.example.news.aggregation.rpc.api.NewsRetrievalRpcService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -23,9 +26,16 @@ import java.util.regex.Pattern;
 public class RetrievalClient {
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    @DubboReference(check = false, timeout = 8000, retries = 0)
+    private NewsRetrievalRpcService newsRetrievalRpcService;
 
     @Value("${app.news.retrieval.base-url:http://localhost:8082}")
     private String retrievalBaseUrl;
+
+    @Value("${app.rpc.enabled:false}")
+    private boolean rpcEnabled;
 
     public List<RetrievalResult> keywordSearch(String query, int topK) {
         return post("/api/news/retrieval/keyword", query, topK, null, null);
@@ -50,9 +60,8 @@ public class RetrievalClient {
     public List<RetrievalResult> hybridSearch(String query, int topK, double minScore, Map<String, Object> filters) {
         return post("/api/news/retrieval/hybrid", query, topK, minScore, filters);
     }
-//    新闻检索
+
     private List<RetrievalResult> post(String path, String query, int topK, Double minScore, Map<String, Object> filters) {
-        String url = retrievalBaseUrl + path;
         RetrievalRequest request = RetrievalRequest.builder()
                 .query(query)
                 .topK(topK)
@@ -60,13 +69,25 @@ public class RetrievalClient {
                 .filters(filters)
                 .build();
         try {
-            log.info("[client] call retrieval|client=retrieval|step=start|url={} |query={} |topK={} |minScore={} |filters={} |next=news-retrieval",
-                    url, querySummary(query), topK, minScore, summarizeFilters(filters));
-            ResponseEntity<RetrievalResponse> response = restTemplate.postForEntity(
-                    url, request, RetrievalResponse.class);
-            RetrievalResponse body = response.getBody();
+            RetrievalResponse body;
+            if (rpcEnabled) {
+                com.example.news.aggregation.rpc.contract.news.RetrievalRequest rpcRequest =
+                        objectMapper.convertValue(request, com.example.news.aggregation.rpc.contract.news.RetrievalRequest.class);
+                com.example.news.aggregation.rpc.contract.news.RetrievalResponse rpcResponse = switch (path) {
+                    case "/api/news/retrieval/keyword" -> newsRetrievalRpcService.keyword(rpcRequest);
+                    case "/api/news/retrieval/vector" -> newsRetrievalRpcService.vector(rpcRequest);
+                    default -> newsRetrievalRpcService.hybrid(rpcRequest);
+                };
+                body = objectMapper.convertValue(rpcResponse, RetrievalResponse.class);
+            } else {
+                String url = retrievalBaseUrl + path;
+                log.info("[client] call retrieval|url={} |query={} |topK={} |minScore={} |filters={}",
+                        url, querySummary(query), topK, minScore, summarizeFilters(filters));
+                ResponseEntity<RetrievalResponse> response = restTemplate.postForEntity(url, request, RetrievalResponse.class);
+                body = response.getBody();
+            }
+
             if (body == null || body.getResults() == null) {
-                log.info("[client] retrieval empty|client=retrieval|step=end|url={} |resultCount=0|next=evidence-merge", url);
                 return new ArrayList<>();
             }
             List<RetrievalResult> results = new ArrayList<>();
@@ -83,8 +104,6 @@ public class RetrievalClient {
                         .metadata(item.getMetadata())
                         .build());
             }
-            log.info("[client] retrieval done|client=retrieval|step=end|url={} |resultCount={} |next=evidence-merge", url, results.size());
-
             return results;
         } catch (Exception e) {
             log.warn("RetrievalClient request failed: path={}, error={}", path, e.getMessage());

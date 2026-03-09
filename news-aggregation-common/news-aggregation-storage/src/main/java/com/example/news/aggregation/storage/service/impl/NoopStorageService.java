@@ -38,4 +38,10 @@ public class NoopStorageService implements StorageService {
     public boolean exists(String objectPath) {
         return false;
     }
+
+    @Override
+    public String getAccessUrl(String path) {
+        // Noop模式下直接返回原路径
+        return path;
+    }
 }

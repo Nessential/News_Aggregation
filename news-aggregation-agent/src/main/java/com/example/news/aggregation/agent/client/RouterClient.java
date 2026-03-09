@@ -2,8 +2,11 @@ package com.example.news.aggregation.agent.client;
 
 import com.example.news.aggregation.llm.springai.contract.RouterRequest;
 import com.example.news.aggregation.llm.springai.contract.RouterResult;
+import com.example.news.aggregation.rpc.api.LlmRouterRpcService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -12,44 +15,56 @@ import org.springframework.web.client.RestTemplate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * LLM Router 客户端(HTTP)。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RouterClient {
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    @DubboReference(check = false, timeout = 5000, retries = 0)
+    private LlmRouterRpcService llmRouterRpcService;
 
     @Value("${app.llm.router.base-url:http://localhost:8081}")
     private String routerBaseUrl;
 
-    /**
-     * 调用 LLM Router 路由接口。
-     */
+    @Value("${app.rpc.enabled:false}")
+    private boolean rpcEnabled;
+
     public RouterResult route(String sessionId, String query, List<String> history, Map<String, Object> constraints) {
-        String url = routerBaseUrl + "/api/router/route";
         RouterRequest request = RouterRequest.builder()
                 .sessionId(sessionId)
                 .query(query)
                 .history(history)
                 .constraints(constraints)
                 .build();
-        try {
-            log.info("[client] 调用路由服务FLOW|agent|client=router|step=start|sessionId={}|url={}|next=LLM-Router",
-                    sessionId, url);
-            ResponseEntity<RouterResult> response = restTemplate.postForEntity(
-                    url, request, RouterResult.class);
-            RouterResult body = response.getBody();
-            if (body != null) {
-                log.info("[client] 路由返回FLOW|agent|client=router|step=end|sessionId={}|taskFamily={}|retrievalMode={}|next=FSM决策",
-                        sessionId, body.getTaskFamily(), body.getRetrievalMode());
+
+        if (rpcEnabled) {
+            try {
+                com.example.news.aggregation.rpc.contract.RouterRequest rpcRequest =
+                        objectMapper.convertValue(request, com.example.news.aggregation.rpc.contract.RouterRequest.class);
+                com.example.news.aggregation.rpc.contract.RouterResult rpcResult = llmRouterRpcService.route(rpcRequest);
+                RouterResult body = objectMapper.convertValue(rpcResult, RouterResult.class);
+                if (body != null) {
+                    log.info("[client] rpc route done|sessionId={}|taskFamily={}|retrievalMode={}",
+                            sessionId, body.getTaskFamily(), body.getRetrievalMode());
+                }
+                return body;
+            } catch (Exception e) {
+                log.warn("RouterClient rpc failed, fallback to http. error={}", e.getMessage());
             }
-            return body;
+        }
+
+        String url = routerBaseUrl + "/api/router/route";
+        try {
+            log.info("[client] call router http|sessionId={}|url={}", sessionId, url);
+            ResponseEntity<RouterResult> response = restTemplate.postForEntity(url, request, RouterResult.class);
+            return response.getBody();
         } catch (Exception e) {
             log.warn("RouterClient route failed, fallback to default rule. error={}", e.getMessage());
             return null;
         }
     }
 }
+

@@ -3,15 +3,17 @@ package com.example.news.aggregation.agent.client;
 import com.example.news.aggregation.llm.springai.contract.GeneratorDraft;
 import com.example.news.aggregation.llm.springai.contract.GeneratorRequest;
 import com.example.news.aggregation.llm.springai.tool.dto.RetrievalResult;
+import com.example.news.aggregation.rpc.api.LlmGeneratorRpcService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -19,12 +21,18 @@ import java.util.stream.Collectors;
 public class GeneratorClient {
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    @DubboReference(check = false, timeout = 10000, retries = 0)
+    private LlmGeneratorRpcService llmGeneratorRpcService;
 
     @Value("${app.llm.base-url:http://localhost:8081}")
     private String llmBaseUrl;
 
+    @Value("${app.rpc.enabled:false}")
+    private boolean rpcEnabled;
+
     public GeneratorDraft generate(String query, String queryInterpretation, String taskFamily, List<RetrievalResult> evidence, String retrievalMode) {
-        String url = llmBaseUrl + "/api/graph/generate";
         GeneratorRequest request = GeneratorRequest.builder()
                 .query(query)
                 .queryInterpretation(queryInterpretation)
@@ -32,31 +40,23 @@ public class GeneratorClient {
                 .retrievalMode(retrievalMode)
                 .evidence(evidence)
                 .build();
+
+        if (rpcEnabled) {
+            try {
+                com.example.news.aggregation.rpc.contract.GeneratorRequest rpcRequest =
+                        objectMapper.convertValue(request, com.example.news.aggregation.rpc.contract.GeneratorRequest.class);
+                com.example.news.aggregation.rpc.contract.GeneratorDraft rpcDraft =
+                        llmGeneratorRpcService.generate(rpcRequest);
+                return objectMapper.convertValue(rpcDraft, GeneratorDraft.class);
+            } catch (Exception e) {
+                log.warn("GeneratorClient rpc failed, fallback to http. error={}", e.getMessage());
+            }
+        }
+
+        String url = llmBaseUrl + "/api/graph/generate";
         try {
-            int evidenceCount = evidence != null ? evidence.size() : 0;
-            long nonEmptyContentCount = evidence != null ? evidence.stream()
-                    .filter(e -> e.getContent() != null && !e.getContent().isBlank())
-                    .count() : 0;
-            String sample = evidence != null ? evidence.stream()
-                    .limit(2)
-                    .map(e -> "id=" + e.getId() + "|contentLen=" + (e.getContent() != null ? e.getContent().length() : 0))
-                    .collect(Collectors.joining(",")) : "";
-            log.info("[client] call generator|url={}|taskFamily={}|evidenceCount={}|nonEmptyContentCount={}|sample={}",
-                    url, taskFamily, evidenceCount, nonEmptyContentCount, sample);
-
             ResponseEntity<GeneratorDraft> response = restTemplate.postForEntity(url, request, GeneratorDraft.class);
-            GeneratorDraft body = response.getBody();
-
-            int answerLength = body != null && body.getAnswerItems() != null
-                    ? body.getAnswerItems().stream()
-                    .map(GeneratorDraft.AnswerItem::getText)
-                    .filter(text -> text != null && !text.isBlank())
-                    .mapToInt(String::length)
-                    .sum()
-                    : 0;
-            int answerItems = body != null && body.getAnswerItems() != null ? body.getAnswerItems().size() : 0;
-            log.info("[client] generator done|answerLength={}|answerItems={}", answerLength, answerItems);
-            return body;
+            return response.getBody();
         } catch (Exception e) {
             log.warn("GeneratorClient generate failed, error={}", e.getMessage());
             return null;
@@ -67,3 +67,5 @@ public class GeneratorClient {
         return generate(query, null, taskFamily, evidence, null);
     }
 }
+
+
