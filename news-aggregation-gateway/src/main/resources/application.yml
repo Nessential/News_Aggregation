@@ -30,10 +30,18 @@ spring:
           uri: http://localhost:8080
           predicates:
             - Path=/api/user/auth/**
+        - id: news-api
+          uri: http://localhost:8080
+          predicates:
+            - Path=/api/news/**
         - id: agent-api
           uri: http://localhost:8084
           predicates:
             - Path=/api/agent/**
+        - id: execution-api
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/execution/**
 
 app:
   auth:
