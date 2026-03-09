@@ -3,8 +3,20 @@ news:
   rss:
     sources:
       - name: BBC
+        url: https://feeds.bbci.co.uk/news/rss.xml
+        category: Hot
+      - name: BBC
+        url: https://feeds.bbci.co.uk/news/world/rss.xml
+        category: world
+      - name: BBC
         url: https://feeds.bbci.co.uk/news/business/rss.xml
-        category: Business
+        category: business
+      - name: BBC
+        url: https://feeds.bbci.co.uk/news/politics/rss.xml
+        category: politics
+      - name: BBC
+        url: https://feeds.bbci.co.uk/news/technology/rss.xml
+        category: technology
 
 # 百度翻译配置
 translate:

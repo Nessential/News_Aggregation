@@ -132,21 +132,21 @@ public class MinioStorageServiceImpl implements StorageService {
      * @param folder      存储文件夹
      * @param fileName    文件名（含扩展名）
      * @param contentType 文件类型
-     * @return
+     * @return 相对路径，如 bucket/folder/filename.jpg
      */
     @Override
     public String upload(InputStream inputStream, String folder, String fileName, String contentType) {
-        String  objectPath = new StringBuilder(sanitizeFileName(folder)).append("/").append(fileName).toString();
+        String objectPath = new StringBuilder(sanitizeFileName(folder)).append("/").append(fileName).toString();
         try {
             minioClient.putObject(PutObjectArgs.builder()
                     .bucket(properties.getBucket())
                     .object(objectPath)
                     .stream(inputStream, -1, 10485760).contentType(contentType).build());
 
-            // 返回完整访问 URL
-            String accessUrl = properties.getEndpoint() + "/" + properties.getBucket() + "/" + objectPath;
-            log.info("文件上传成功: {}", accessUrl);
-            return accessUrl;
+            // 返回相对路径（包含bucket）
+            String relativePath = properties.getBucket() + "/" + objectPath;
+            log.info("文件上传成功: {}", relativePath);
+            return relativePath;
         } catch (Exception e) {
             log.error("文件上传失败: {}/{}", folder, fileName, e);
             throw new StorageException("文件上传失败", e, StorageErrorCode.UPLOAD_FAILED);
@@ -230,5 +230,18 @@ public class MinioStorageServiceImpl implements StorageService {
                 .replaceAll("_+", "_");
         // 限制长度（使用处理后的字符串长度）
         return sanitized.substring(0, Math.min(sanitized.length(), 50));
+    }
+
+    @Override
+    public String getAccessUrl(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        // 如果已经是完整URL，直接返回
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path;
+        }
+        // 拼接完整URL: endpoint + path
+        return properties.getEndpoint() + "/" + path;
     }
 }

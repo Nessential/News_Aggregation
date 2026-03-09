@@ -5,15 +5,12 @@ import com.example.news.aggregation.llm.springai.contract.ExecutionStep;
 import org.springframework.stereotype.Component;
 
 /**
- * 执行步骤语义映射器。
- */
+ * 鎵ц姝ラ璇箟鏄犲皠鍣ㄣ€? */
 @Component
 public class StepSemanticMapper {
 
     /**
-     * 解析步骤副作用语义。
-     * 当 Planner 未显式提供副作用时，统一按 NONE 处理，避免执行层出现空值分支。
-     */
+     * 瑙ｆ瀽姝ラ鍓綔鐢ㄨ涔夈€?     * 褰?Planner 鏈樉寮忔彁渚涘壇浣滅敤鏃讹紝缁熶竴鎸?NONE 澶勭悊锛岄伩鍏嶆墽琛屽眰鍑虹幇绌哄€煎垎鏀€?     */
     public String resolveSideEffect(ExecutionStep step) {
         if (step == null || step.getSideEffect() == null) {
             return ExecutionEnums.SideEffectType.NONE.name();
@@ -22,9 +19,7 @@ public class StepSemanticMapper {
     }
 
     /**
-     * 解析完成判定规则引用。
-     * 优先使用 doneCheck.expression；未提供时回退到 required_fields。
-     */
+     * 瑙ｆ瀽瀹屾垚鍒ゅ畾瑙勫垯寮曠敤銆?     * 浼樺厛浣跨敤 doneCheck.expression锛涙湭鎻愪緵鏃跺洖閫€鍒?required_fields銆?     */
     public String resolveDoneCheckRef(ExecutionStep step) {
         if (step == null || step.getDoneCheck() == null) {
             return "";
@@ -35,3 +30,4 @@ public class StepSemanticMapper {
         return "required_fields";
     }
 }
+

@@ -22,6 +22,7 @@
         <module>news-aggregation-job</module>
         <module>news-aggregation-storage</module>
         <module>news-aggregation-es</module>
+        <module>news-aggregation-rpc-contract</module>
     </modules>
 
 

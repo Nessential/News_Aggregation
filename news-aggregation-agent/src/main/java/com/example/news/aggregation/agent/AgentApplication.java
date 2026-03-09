@@ -5,11 +5,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import com.example.news.aggregation.llm.springai.decision.DecisionTable;
+import org.apache.dubbo.config.spring.context.annotation.EnableDubbo;
 
 /**
  * Agent 启动类。
  */
 @EnableScheduling
+@EnableDubbo
 @Import(DecisionTable.class)
 @SpringBootApplication(scanBasePackages = {
         "com.example.news.aggregation.agent",

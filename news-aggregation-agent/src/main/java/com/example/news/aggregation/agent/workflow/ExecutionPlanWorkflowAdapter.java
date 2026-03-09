@@ -25,6 +25,10 @@ public class ExecutionPlanWorkflowAdapter {
 
     /**
      * 转换 ExecutionPlan 为 WorkflowDefinition。
+     * 关键职责：
+     * 1. 为每个步骤解析 capability（优先使用 step.tool）；
+     * 2. 将输入参数、语义字段(sideEffect/doneCheck)注入 WorkflowStep；
+     * 3. 生成工作流元数据，便于审计与排障。
      */
     public WorkflowDefinition toWorkflowDefinition(ExecutionPlan plan, Map<String, List<String>> typeToolMap) {
         if (plan == null || plan.getSteps() == null || plan.getSteps().isEmpty()) {
@@ -36,7 +40,8 @@ public class ExecutionPlanWorkflowAdapter {
                     .metadata(Map.of("source", "planner"))
                     .build();
         }
-        log.info("[adapter] 开始转换计划|planId={} |stepCount={}", plan.getPlanId(), plan.getSteps().size());
+        log.info("[adapter] 开始转换计划：planId={}, stepCount={}",
+                plan.getPlanId(), plan.getSteps().size());
 
         List<WorkflowStep> steps = new ArrayList<>();
         for (ExecutionStep step : plan.getSteps()) {
@@ -46,7 +51,7 @@ public class ExecutionPlanWorkflowAdapter {
             }
             String capability = resolveCapability(step, typeToolMap);
             if (capability == null || capability.isBlank()) {
-                log.warn("[adapter] 步骤未解析到 capability，已跳过|stepId={} |stepType={}",
+                log.warn("[adapter] 步骤未解析到能力，已跳过：stepId={}, stepType={}",
                         step.getStepId(), step.getType());
                 continue;
             }
@@ -65,14 +70,8 @@ public class ExecutionPlanWorkflowAdapter {
                     .parameters(parameters)
                     .sideEffect(stepSemanticMapper.resolveSideEffect(step))
                     .doneCheckRef(stepSemanticMapper.resolveDoneCheckRef(step))
-                    .outputSchema(step.getOutputSchema())
-                    .doneCheck(step.getDoneCheck())
-                    .schemaVersion(plan.getSchemaVersion())
-                    .semanticVersion(plan.getSemanticVersion())
-                    .retryPolicy(step.getRetryPolicy())
-                    .failurePolicy(step.getFailurePolicy())
                     .build());
-            log.info("[adapter] 步骤转换完成|stepId={} |stepType={} |capability={} |dependsOn={}",
+            log.info("[adapter] 步骤转换完成：stepId={}, stepType={}, capability={}, dependsOn={}",
                     step.getStepId(),
                     step.getType(),
                     capability,
@@ -83,14 +82,11 @@ public class ExecutionPlanWorkflowAdapter {
         metadata.put("source", "execution-plan");
         metadata.put("stepCount", steps.size());
         metadata.put("planId", plan.getPlanId());
-        metadata.put("planVersion", plan.getPlanVersion() == null ? 1 : plan.getPlanVersion());
-        metadata.put("parentPlanId", plan.getParentPlanId());
-        metadata.put("replanReasonCode", plan.getReplanReasonCode());
         metadata.put("generatedAt", LocalDateTime.now().toString());
         if (plan.getMetadata() != null) {
             metadata.putAll(plan.getMetadata());
         }
-        log.info("[adapter] 计划转换结束|planId={} |workflowStepCount={}", plan.getPlanId(), steps.size());
+        log.info("[adapter] 计划转换结束：planId={}, workflowStepCount={}", plan.getPlanId(), steps.size());
 
         return WorkflowDefinition.builder()
                 .id("EXECUTION_PLAN_WORKFLOW_" + System.currentTimeMillis())
@@ -102,14 +98,8 @@ public class ExecutionPlanWorkflowAdapter {
 
     private String resolveCapability(ExecutionStep step, Map<String, List<String>> typeToolMap) {
         if (step.getTool() != null && !step.getTool().isBlank()) {
-            String normalized = normalizeCapabilityTool(step.getTool());
-            if (!normalized.equals(step.getTool())) {
-                log.info("[adapter] 工具别名已归一化|stepId={} |tool={} |capability={}",
-                        step.getStepId(), step.getTool(), normalized);
-            } else {
-                log.debug("[adapter] 使用步骤显式工具|stepId={} |tool={}", step.getStepId(), step.getTool());
-            }
-            return normalized;
+            log.debug("[adapter] 使用步骤显式工具：stepId={}, tool={}", step.getStepId(), step.getTool());
+            return step.getTool();
         }
         if (typeToolMap == null || step.getType() == null) {
             return null;
@@ -119,18 +109,8 @@ public class ExecutionPlanWorkflowAdapter {
             return null;
         }
         String resolved = tools.stream().filter(Objects::nonNull).findFirst().orElse(null);
-        log.debug("[adapter] 使用类型映射工具|stepId={} |stepType={} |tool={}",
+        log.debug("[adapter] 使用类型映射工具：stepId={}, stepType={}, tool={}",
                 step.getStepId(), step.getType(), resolved);
         return resolved;
-    }
-
-    private String normalizeCapabilityTool(String toolName) {
-        if (toolName == null || toolName.isBlank()) {
-            return toolName;
-        }
-        return switch (toolName) {
-            case "hybrid_retrieve_news" -> "retrieve_news";
-            default -> toolName;
-        };
     }
 }

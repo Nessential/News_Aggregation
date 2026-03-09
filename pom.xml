@@ -32,6 +32,8 @@
         <maven.compiler.target>21</maven.compiler.target>
         <spring-ai-alibaba.version>1.1.0.0</spring-ai-alibaba.version>
         <resilience4j.version>2.3.0</resilience4j.version>
+        <dubbo.version>3.3.5</dubbo.version>
+        <nacos.client.version>2.3.2</nacos.client.version>
     </properties>
 
     <dependencyManagement>
@@ -135,6 +137,12 @@
                 <version>${project.version}</version>
             </dependency>
 
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>news-aggregation-rpc-contract</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- Spring AI Alibaba BOM -->
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>
@@ -149,6 +157,24 @@
                 <groupId>io.github.resilience4j</groupId>
                 <artifactId>resilience4j-spring-boot3</artifactId>
                 <version>${resilience4j.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-spring-boot-starter</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-rpc-triple</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.alibaba.nacos</groupId>
+                <artifactId>nacos-client</artifactId>
+                <version>${nacos.client.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

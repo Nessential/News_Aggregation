@@ -54,6 +54,27 @@
             <version>${project.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>news-aggregation-rpc-contract</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-rpc-triple</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-client</artifactId>
+        </dependency>
+
         <!-- Agent 模块 (Phase 0集成模式) -->
 
 

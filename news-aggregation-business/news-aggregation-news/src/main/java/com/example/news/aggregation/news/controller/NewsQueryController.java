@@ -10,6 +10,7 @@ import com.example.news.aggregation.news.dto.NewsDetailDto;
 import com.example.news.aggregation.news.dto.NewsListItemDto;
 import com.example.news.aggregation.news.dto.NewsListResponse;
 import com.example.news.aggregation.news.infrastructure.mapper.NewsMapper;
+import com.example.news.aggregation.storage.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
 public class NewsQueryController {
 
     private final NewsMapper newsMapper;
+    private final StorageService storageService;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm")
@@ -187,7 +189,7 @@ public class NewsQueryController {
                 .summaryCn(summaryCn)
                 .titleEn(titleEn)
                 .summaryEn(summaryEn)
-                .imageUrl(news.getImage_url())
+                .imageUrl(storageService.getAccessUrl(news.getImage_url()))
                 .link(news.getLink())
                 .source(news.getSource())
                 .publishedAt(publishedAt)
@@ -222,7 +224,7 @@ public class NewsQueryController {
                 .titleEn(titleEn)
                 .summaryEn(summaryEn)
                 .contentEn(contentEn)
-                .imageUrl(news.getImage_url())
+                .imageUrl(storageService.getAccessUrl(news.getImage_url()))
                 .link(news.getLink())
                 .source(news.getSource())
                 .publishedAt(publishedAt)

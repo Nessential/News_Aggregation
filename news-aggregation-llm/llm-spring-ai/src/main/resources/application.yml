@@ -18,14 +18,12 @@ spring:
     nacos:
       mcp:
         server:
-          enabled: false
+          enabled: true
           server-addr: ${NACOS_ADDR:localhost:8848}
           namespace: news-agent
           group-id: MCP_TOOLS
-          username: ${NACOS_USERNAME:nacos}
-          password: ${NACOS_PASSWORD:nacos}
         client:
-          enabled: false
+          enabled: true
           server-addr: ${NACOS_ADDR:localhost:8848}
           namespace: news-agent
 
@@ -104,3 +102,16 @@ logging:
     com.example.news.aggregation.llm.springai: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+dubbo:
+  application:
+    name: ${spring.application.name}
+  protocol:
+    name: tri
+    port: ${DUBBO_PORT:20881}
+  registry:
+    address: nacos://${NACOS_ADDR:localhost:8848}
+    parameters:
+      namespace: ${NACOS_NAMESPACE:news-agent}
+  consumer:
+    check: false

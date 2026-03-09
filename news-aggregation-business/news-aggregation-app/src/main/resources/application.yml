@@ -24,4 +24,16 @@ server:
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
 
+dubbo:
+  application:
+    name: ${spring.application.name}
+  protocol:
+    name: tri
+    port: ${DUBBO_PORT:20880}
+  registry:
+    address: nacos://${NACOS_ADDR:localhost:8848}
+    parameters:
+      namespace: ${NACOS_NAMESPACE:news-agent}
+  consumer:
+    check: false
 
