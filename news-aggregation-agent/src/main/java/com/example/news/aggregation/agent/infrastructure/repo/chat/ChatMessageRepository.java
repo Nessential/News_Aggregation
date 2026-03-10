@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.news.aggregation.agent.domain.chat.ChatMessageEntity;
+import com.example.news.aggregation.agent.domain.chat.UserSessionSummary;
 import com.example.news.aggregation.agent.infrastructure.mapper.chat.ChatMessageMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -40,6 +41,10 @@ public class ChatMessageRepository {
         return chatMessageMapper.selectHistoryExcludingTurn(sessionId, excludeTurnId, limit);
     }
 
+    public List<UserSessionSummary> findRecentSessionsByUserId(String userId, int limit) {
+        return chatMessageMapper.selectRecentSessionsByUserId(userId, limit);
+    }
+
     public IPage<ChatMessageEntity> findBySessionIdWithPage(String sessionId, int pageNum, int pageSize) {
         LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ChatMessageEntity::getSessionId, sessionId)
@@ -58,6 +63,10 @@ public class ChatMessageRepository {
         LambdaQueryWrapper<ChatMessageEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ChatMessageEntity::getSessionId, sessionId);
         return chatMessageMapper.selectCount(wrapper).intValue();
+    }
+
+    public int countBySessionIdAndUserId(String sessionId, String userId) {
+        return chatMessageMapper.countBySessionIdAndUserId(sessionId, userId);
     }
 
     public int deleteBySessionId(String sessionId) {

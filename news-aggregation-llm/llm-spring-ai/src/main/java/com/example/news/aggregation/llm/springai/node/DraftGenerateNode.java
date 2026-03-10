@@ -105,7 +105,8 @@ public class DraftGenerateNode {
                 + "要求:\n"
                 + "1) answerItems 至少1条;\n"
                 + "2) 每条 text 不能为空;\n"
-                + "3) newsIds 必须是字符串ID数组; 若确实无证据可填空数组。";
+                + "3) newsIds 必须是字符串ID数组; 若确实无证据可填空数组;\n"
+                + "4) text 内容中合理换行，使用换行符\\n分隔，每段不宜过长。";
         return rendered + schemaInstruction;
     }
 

@@ -61,6 +61,15 @@ app:
     enforce: ${APP_AUTH_ENFORCE:true}
     user-id-header: ${APP_AUTH_USER_ID_HEADER:X-User-Id}
     protected-path-prefix: /api/agent
+  feature-quota:
+    enabled: ${APP_FEATURE_QUOTA_ENABLED:true}
+    fail-open: ${APP_FEATURE_QUOTA_FAIL_OPEN:true}
+    redis-prefix: ${APP_FEATURE_QUOTA_REDIS_PREFIX:quota:daily}
+    zone-id: ${APP_FEATURE_QUOTA_ZONE_ID:Asia/Shanghai}
+    features:
+      chat:
+        enabled: ${APP_FEATURE_QUOTA_CHAT_ENABLED:true}
+        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:1}
   rpc:
     enabled: ${APP_RPC_ENABLED:true}
   news:

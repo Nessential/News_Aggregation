@@ -1,6 +1,8 @@
 package com.example.news.aggregation.news.service.impl;
 
 import com.example.news.aggregation.base.exception.BizException;
+import com.example.news.aggregation.cache.quota.model.FeatureQuotaSnapshot;
+import com.example.news.aggregation.cache.quota.service.FeatureQuotaService;
 import com.example.news.aggregation.news.config.SmsAuthProperties;
 import com.example.news.aggregation.news.domain.entity.SmsSendRecord;
 import com.example.news.aggregation.news.domain.entity.UserAccount;
@@ -22,7 +24,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.Date;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -50,6 +54,7 @@ public class UserAuthServiceImpl implements UserAuthService {
     private final SmsGateway smsGateway;
     private final SmsAuthProperties properties;
     private final TokenService tokenService;
+    private final FeatureQuotaService featureQuotaService;
 
     @Override
     public SmsSendCodeResponse sendSmsCode(String phone) {
@@ -61,12 +66,10 @@ public class UserAuthServiceImpl implements UserAuthService {
         String outId = UUID.randomUUID().toString().replace("-", "");
         SmsSendRecord record = createInitRecord(phone, outId);
         if (properties.isEnabled()) {
-            // 快速返回：后台虚拟线程执行同步网关调用。
             Thread.ofVirtual().name("sms-send-" + outId).start(() -> sendCodeAsync(record.getId(), phone, outId));
-            log.info("[user-auth] 验证码发送已受理（异步）|phone={} |requestId={} |recordId={}",
+            log.info("[user-auth] \u9a8c\u8bc1\u7801\u53d1\u9001\u5df2\u53d7\u7406\uff08\u5f02\u6b65\uff09|phone={} |requestId={} |recordId={}",
                     maskPhone(phone), outId, record.getId());
         } else {
-            // 本地调试模式：固定验证码写入 Redis，便于前后端联调。
             String mockCodeKey = buildSmsMockCodeKey(phone);
             redisTemplate.opsForValue().set(
                     mockCodeKey,
@@ -75,11 +78,12 @@ public class UserAuthServiceImpl implements UserAuthService {
                     TimeUnit.SECONDS
             );
             markRecordSuccess(record.getId(), "MOCK_SUCCESS", "local mock mode", outId);
-            log.info("[user-auth] 本地调试验证码已生成|phone={} |mockCode={}", maskPhone(phone), properties.getMockCode());
+            log.info("[user-auth] \u672c\u5730\u8c03\u8bd5\u9a8c\u8bc1\u7801\u5df2\u751f\u6210|phone={} |mockCode={}",
+                    maskPhone(phone), properties.getMockCode());
         }
 
         redisTemplate.opsForValue().set(buildSmsOutIdKey(phone), outId, properties.getValidTimeSeconds(), TimeUnit.SECONDS);
-        log.info("[user-auth] 验证码发送请求完成|phone={} |enabled={} |expireSeconds={} |resendIntervalSeconds={} |requestId={}",
+        log.info("[user-auth] \u9a8c\u8bc1\u7801\u53d1\u9001\u8bf7\u6c42\u5b8c\u6210|phone={} |enabled={} |expireSeconds={} |resendIntervalSeconds={} |requestId={}",
                 maskPhone(phone), properties.isEnabled(), properties.getValidTimeSeconds(), properties.getRateLimitWindowSeconds(), outId);
         return SmsSendCodeResponse.builder()
                 .success(true)
@@ -102,7 +106,7 @@ public class UserAuthServiceImpl implements UserAuthService {
         if (properties.isEnabled()) {
             SmsGateway.SmsVerifyResult result = smsGateway.verifyCode(phone, code, outId);
             if (!result.isPassed()) {
-                log.warn("[user-auth] 验证码校验失败|phone={} |providerCode={} |verifyResult={}",
+                log.warn("[user-auth] \u9a8c\u8bc1\u7801\u6821\u9a8c\u5931\u8d25|phone={} |providerCode={} |verifyResult={}",
                         maskPhone(phone), result.getProviderCode(), result.getVerifyResult());
                 throw new BizException(UserAuthErrorCode.INVALID_SMS_CODE);
             }
@@ -125,17 +129,24 @@ public class UserAuthServiceImpl implements UserAuthService {
                 throw new BizException(UserAuthErrorCode.USER_SAVE_FAILED);
             }
             isNewUser = true;
-            log.info("[user-auth] 新用户注册完成|userId={} |phone={} |username={}",
+            log.info("[user-auth] \u65b0\u7528\u6237\u6ce8\u518c\u5b8c\u6210|userId={} |phone={} |username={}",
                     user.getId(), maskPhone(phone), user.getUsername());
         } else {
-            log.info("[user-auth] 老用户登录成功|userId={} |phone={}", user.getId(), maskPhone(phone));
+            log.info("[user-auth] \u8001\u7528\u6237\u767b\u5f55\u6210\u529f|userId={} |phone={}", user.getId(), maskPhone(phone));
         }
 
-        // 登录成功后清理验证码上下文，避免重复使用。
         redisTemplate.delete(buildSmsOutIdKey(phone));
         redisTemplate.delete(buildSmsMockCodeKey(phone));
-        // 生成登录Token
+
         String token = tokenService.generateToken(user.getId());
+
+        Map<String, FeatureQuotaSnapshot> featureQuotas = Collections.emptyMap();
+        try {
+            featureQuotas = featureQuotaService.queryAllQuotas(user.getId());
+        } catch (Exception ex) {
+            log.error("[quota] \u767b\u5f55\u540e\u67e5\u8be2\u7528\u6237\u9650\u989d\u5931\u8d25\uff0c\u6309\u7a7a\u7ed3\u679c\u8fd4\u56de|userId={}",
+                    user.getId(), ex);
+        }
 
         return SmsLoginResponse.builder()
                 .userId(user.getId())
@@ -144,7 +155,21 @@ public class UserAuthServiceImpl implements UserAuthService {
                 .phone(user.getPhone())
                 .newUser(isNewUser)
                 .token(token)
+                .featureQuotas(featureQuotas)
                 .build();
+    }
+
+    @Override
+    public Map<String, FeatureQuotaSnapshot> queryUserFeatureQuotas(Long userId) {
+        if (userId == null || userId <= 0) {
+            return Collections.emptyMap();
+        }
+        try {
+            return featureQuotaService.queryAllQuotas(userId);
+        } catch (Exception ex) {
+            log.error("[quota] \u67e5\u8be2\u5f53\u524d\u7528\u6237\u9650\u989d\u5931\u8d25|userId={}", userId, ex);
+            return Collections.emptyMap();
+        }
     }
 
     private void validatePhone(String phone) {
@@ -161,9 +186,9 @@ public class UserAuthServiceImpl implements UserAuthService {
 
     private String buildDefaultUsername(String phone) {
         if (phone == null || phone.length() < 4) {
-            return "用户";
+            return "\u7528\u6237";
         }
-        return "用户" + phone.substring(phone.length() - 4);
+        return "\u7528\u6237" + phone.substring(phone.length() - 4);
     }
 
     private String buildSmsOutIdKey(String phone) {
@@ -199,12 +224,11 @@ public class UserAuthServiceImpl implements UserAuthService {
                 return;
             }
             markRecordFailed(recordId, result.getProviderCode(), result.getProviderMessage(), result.getProviderRequestId());
-            // 发送失败时删除 outId，避免进入无效校验流程；由用户重新触发发送。
             redisTemplate.delete(buildSmsOutIdKey(phone));
         } catch (Exception ex) {
             markRecordFailed(recordId, "SYSTEM_ERROR", ex.getMessage(), null);
             redisTemplate.delete(buildSmsOutIdKey(phone));
-            log.error("[user-auth] 异步发送验证码异常|phone={} |requestId={} |recordId={}",
+            log.error("[user-auth] \u5f02\u6b65\u53d1\u9001\u9a8c\u8bc1\u7801\u5f02\u5e38|phone={} |requestId={} |recordId={}",
                     maskPhone(phone), outId, recordId, ex);
         }
     }
@@ -215,13 +239,10 @@ public class UserAuthServiceImpl implements UserAuthService {
 
     private void markRecordFailed(Long recordId, String providerCode, String providerMessage, String providerRequestId) {
         updateRecordStateWithCas(recordId, STATE_FAILED, providerCode, providerMessage, providerRequestId, null);
-        log.warn("[user-auth] 验证码发送失败已记录|recordId={} |providerCode={} |providerMessage={}",
+        log.warn("[user-auth] \u9a8c\u8bc1\u7801\u53d1\u9001\u5931\u8d25\u5df2\u8bb0\u5f55|recordId={} |providerCode={} |providerMessage={}",
                 recordId, providerCode, providerMessage);
     }
 
-    /**
-     * 使用 id + lock_version + fromState 做 CAS 更新，避免并发覆盖短信发送状态。
-     */
     private void updateRecordStateWithCas(Long recordId,
                                           String targetState,
                                           String providerCode,
@@ -231,7 +252,7 @@ public class UserAuthServiceImpl implements UserAuthService {
         for (int attempt = 1; attempt <= RECORD_UPDATE_MAX_RETRIES; attempt++) {
             SmsSendRecord current = smsSendRecordMapper.selectById(recordId);
             if (current == null) {
-                log.warn("[user-auth] 短信发送记录不存在，跳过状态更新|recordId={} |targetState={}",
+                log.warn("[user-auth] \u77ed\u4fe1\u53d1\u9001\u8bb0\u5f55\u4e0d\u5b58\u5728\uff0c\u8df3\u8fc7\u72b6\u6001\u66f4\u65b0|recordId={} |targetState={}",
                         recordId, targetState);
                 return;
             }
@@ -241,7 +262,7 @@ public class UserAuthServiceImpl implements UserAuthService {
                 if (targetState.equals(currentState)) {
                     return;
                 }
-                log.warn("[user-auth] 短信发送记录状态已变化，跳过覆盖|recordId={} |currentState={} |targetState={}",
+                log.warn("[user-auth] \u77ed\u4fe1\u53d1\u9001\u8bb0\u5f55\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8df3\u8fc7\u8986\u76d6|recordId={} |currentState={} |targetState={}",
                         recordId, currentState, targetState);
                 return;
             }
@@ -260,17 +281,14 @@ public class UserAuthServiceImpl implements UserAuthService {
             if (rows > 0) {
                 return;
             }
-            log.warn("[user-auth] 短信发送记录 CAS 更新冲突，准备重试|recordId={} |targetState={} |attempt={}",
+            log.warn("[user-auth] \u77ed\u4fe1\u53d1\u9001\u8bb0\u5f55 CAS \u66f4\u65b0\u51b2\u7a81\uff0c\u51c6\u5907\u91cd\u8bd5|recordId={} |targetState={} |attempt={}",
                     recordId, targetState, attempt);
         }
 
-        log.error("[user-auth] 短信发送记录 CAS 更新失败（超过最大重试）|recordId={} |targetState={}",
+        log.error("[user-auth] \u77ed\u4fe1\u53d1\u9001\u8bb0\u5f55 CAS \u66f4\u65b0\u5931\u8d25\uff08\u8d85\u8fc7\u6700\u5927\u91cd\u8bd5\uff09|recordId={} |targetState={}",
                 recordId, targetState);
     }
 
-    /**
-     * 使用 Redisson RRateLimiter 做按手机号限流（令牌桶模型）。
-     */
     private boolean allowSendByRateLimiter(String phone) {
         long windowSeconds = Math.max(properties.getRateLimitWindowSeconds(), 1L);
         long maxRequests = Math.max(properties.getRateLimitMaxRequests(), 1L);
@@ -279,7 +297,7 @@ public class UserAuthServiceImpl implements UserAuthService {
         rateLimiter.trySetRate(RateType.OVERALL, maxRequests, windowSeconds, RateIntervalUnit.SECONDS);
         boolean allowed = rateLimiter.tryAcquire(1);
         if (!allowed) {
-            log.warn("[user-auth] 短信限流命中|phone={} |windowSeconds={} |maxRequests={}",
+            log.warn("[user-auth] \u77ed\u4fe1\u9650\u6d41\u547d\u4e2d|phone={} |windowSeconds={} |maxRequests={}",
                     maskPhone(phone), windowSeconds, maxRequests);
         }
         return allowed;
