@@ -12,7 +12,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -59,6 +63,30 @@ public class SessionManager {
 
         saveSession(sessionState);
         log.info("[session] 创建会话成功: sessionId={}, userId={}", sessionId, userId);
+        return sessionState;
+    }
+
+    /**
+     * 使用指定会话ID恢复会话，适用于 Redis 过期后的历史会话续聊。
+     */
+    public SessionState restoreSession(String sessionId, String userId, List<String> history) {
+        LocalDateTime now = LocalDateTime.now();
+        List<String> safeHistory = history == null ? new ArrayList<>() : new ArrayList<>(history);
+        if (safeHistory.size() > maxHistorySize) {
+            safeHistory = new ArrayList<>(safeHistory.subList(safeHistory.size() - maxHistorySize, safeHistory.size()));
+        }
+
+        SessionState sessionState = SessionState.builder()
+                .sessionId(sessionId)
+                .userId(userId)
+                .budget(10)
+                .history(safeHistory)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+
+        saveSession(sessionState);
+        log.info("[session] 会话恢复成功: sessionId={}, userId={}, historySize={}", sessionId, userId, safeHistory.size());
         return sessionState;
     }
 
@@ -179,6 +207,47 @@ public class SessionManager {
     }
 
     /**
+     * 按用户查询最近会话列表，按 updatedAt 倒序返回。
+     */
+    public List<SessionState> listUserSessions(String userId, int limit) {
+        if (userId == null || userId.isBlank()) {
+            return Collections.emptyList();
+        }
+        int safeLimit = Math.max(1, limit);
+        Set<String> allKeys = redisTemplate.keys(SESSION_KEY_PREFIX + "*");
+        if (allKeys == null || allKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> sessionKeys = allKeys.stream()
+                .filter(this::isPureSessionKey)
+                .toList();
+        if (sessionKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Object> values = redisTemplate.opsForValue().multiGet(sessionKeys);
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<SessionState> result = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof SessionState sessionState)) {
+                continue;
+            }
+            if (!userId.equals(sessionState.getUserId())) {
+                continue;
+            }
+            result.add(sessionState);
+        }
+
+        result.sort(Comparator.comparing(this::getSessionSortTime).reversed());
+        if (result.size() <= safeLimit) {
+            return result;
+        }
+        return new ArrayList<>(result.subList(0, safeLimit));
+    }
+
+    /**
      * 尝试获取会话级锁（Redisson 看门狗自动续租）。
      */
     public boolean tryAcquireSessionLock(String sessionId, String turnId) {
@@ -260,6 +329,29 @@ public class SessionManager {
 
     private String buildLockOwnerKey(String sessionId) {
         return SESSION_LOCK_OWNER_KEY_PREFIX + sessionId;
+    }
+
+    private boolean isPureSessionKey(String key) {
+        if (key == null || !key.startsWith(SESSION_KEY_PREFIX)) {
+            return false;
+        }
+        if (key.startsWith(SESSION_LOCK_KEY_PREFIX)) {
+            return false;
+        }
+        if (key.startsWith(SESSION_LOCK_OWNER_KEY_PREFIX)) {
+            return false;
+        }
+        return key.length() > SESSION_KEY_PREFIX.length();
+    }
+
+    private LocalDateTime getSessionSortTime(SessionState sessionState) {
+        if (sessionState.getUpdatedAt() != null) {
+            return sessionState.getUpdatedAt();
+        }
+        if (sessionState.getCreatedAt() != null) {
+            return sessionState.getCreatedAt();
+        }
+        return LocalDateTime.MIN;
     }
 
     private void setActiveTurnId(String sessionId, String turnId) {

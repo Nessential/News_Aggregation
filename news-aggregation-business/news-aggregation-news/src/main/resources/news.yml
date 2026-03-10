@@ -67,5 +67,14 @@ sms:
 
 # Token 配置
 app:
+  feature-quota:
+    enabled: ${APP_FEATURE_QUOTA_ENABLED:true}
+    fail-open: ${APP_FEATURE_QUOTA_FAIL_OPEN:true}
+    redis-prefix: ${APP_FEATURE_QUOTA_REDIS_PREFIX:quota:daily}
+    zone-id: ${APP_FEATURE_QUOTA_ZONE_ID:Asia/Shanghai}
+    features:
+      chat:
+        enabled: ${APP_FEATURE_QUOTA_CHAT_ENABLED:true}
+        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:1}
   token:
     expire-hours: ${APP_TOKEN_EXPIRE_HOURS:24}

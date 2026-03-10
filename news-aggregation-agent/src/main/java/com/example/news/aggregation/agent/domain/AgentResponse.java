@@ -1,6 +1,7 @@
 package com.example.news.aggregation.agent.domain;
 
 import com.example.news.aggregation.agent.enums.TaskFamily;
+import com.example.news.aggregation.cache.quota.model.FeatureQuotaSnapshot;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,6 +10,7 @@ import lombok.NoArgsConstructor;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -35,6 +37,9 @@ public class AgentResponse implements Serializable {
     private LocalDateTime timestamp;
     private Long executionTimeMs;
     private ResponseMetadata metadata;
+
+    /** Current user's feature quota snapshot for frontend rendering. */
+    private Map<String, FeatureQuotaSnapshot> featureQuotas;
 
     @Data
     @Builder

@@ -3,6 +3,7 @@ package com.example.news.aggregation.agent.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.news.aggregation.agent.config.ChatHistoryProperties;
 import com.example.news.aggregation.agent.domain.chat.ChatMessageEntity;
+import com.example.news.aggregation.agent.domain.chat.UserSessionSummary;
 import com.example.news.aggregation.agent.enums.MessageRole;
 import com.example.news.aggregation.agent.enums.MessageStatus;
 import com.example.news.aggregation.agent.infrastructure.repo.chat.ChatMessageRepository;
@@ -112,6 +113,20 @@ public class ChatHistoryService {
     public List<ChatMessageEntity> getUserHistory(String userId, int pageNum, int pageSize) {
         return chatMessageRepository.findByUserIdWithPage(userId, pageNum, pageSize)
                 .getRecords();
+    }
+
+    /**
+     * 按用户查询最近会话（用于 Redis 会话为空时兜底）。
+     */
+    public List<UserSessionSummary> getRecentSessionsByUser(String userId, int limit) {
+        return chatMessageRepository.findRecentSessionsByUserId(userId, limit);
+    }
+
+    /**
+     * 判断会话是否归属于当前用户（用于会话恢复前的安全校验）。
+     */
+    public boolean sessionBelongsToUser(String sessionId, String userId) {
+        return chatMessageRepository.countBySessionIdAndUserId(sessionId, userId) > 0;
     }
 
     /**
