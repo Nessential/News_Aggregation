@@ -23,6 +23,7 @@ spring:
                 allowedOrigins:
                   - "http://localhost:5173"
                   - "http://127.0.0.1:5173"
+                  - "http://localhost/"
                 allowedMethods: "*"
                 allowedHeaders: "*"
       routes:
@@ -50,6 +51,8 @@ app:
     skip-paths:
       - /api/user/auth/sms/send-code
       - /api/user/auth/sms/login
+      - /api/news/**
+      - /api/news/categories/**
     token:
       aes-key: ${TOKEN_AES_KEY:tokenbynfturbo_0}
       redis-prefix: ${TOKEN_REDIS_PREFIX:token:login:}
