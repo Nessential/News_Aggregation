@@ -103,7 +103,6 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
             long ttlSeconds = secondsToMidnight();
             ensureHashInitialized(key, normalizedFeature, featureConfig.getDailyLimit(), ttlSeconds);
             String usedField = usedField(normalizedFeature);
-            String limitField = limitField(normalizedFeature);
             Long after = redisTemplate.opsForHash().increment(key, usedField, 1L);
             ensureExpireIfMissing(key, ttlSeconds);
 
@@ -116,7 +115,7 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
                         .build();
             }
 
-            int effectiveLimit = resolveLimit(key, normalizedFeature, featureConfig.getDailyLimit());
+            int effectiveLimit = Math.max(featureConfig.getDailyLimit(), 0);
             if (after > effectiveLimit) {
                 // Rollback over-consume to keep counter in sync.
                 redisTemplate.opsForHash().increment(key, usedField, -1L);
@@ -189,7 +188,7 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
         ensureHashInitialized(key, featureCode, featureConfig.getDailyLimit(), ttlSeconds);
         ensureExpireIfMissing(key, ttlSeconds);
         int used = safeToInt(redisTemplate.opsForHash().get(key, usedField(featureCode)));
-        int limit = resolveLimit(key, featureCode, featureConfig.getDailyLimit());
+        int limit = Math.max(featureConfig.getDailyLimit(), 0);
         int remaining = Math.max(limit - used, 0);
         long expireAtEpochMs = System.currentTimeMillis() + Math.max(getTtlSeconds(key), 0) * 1000;
         return FeatureQuotaSnapshot.builder()
@@ -204,26 +203,11 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
 
     private void ensureHashInitialized(String key, String featureCode, int defaultLimit, long ttlSeconds) {
         redisTemplate.opsForHash().putIfAbsent(key, usedField(featureCode), 0);
-        if (defaultLimit > 0) {
-            redisTemplate.opsForHash().putIfAbsent(key, limitField(featureCode), defaultLimit);
-        }
         ensureExpireIfMissing(key, ttlSeconds);
-    }
-
-    private int resolveLimit(String key, String featureCode, int defaultLimit) {
-        int parsed = safeToInt(redisTemplate.opsForHash().get(key, limitField(featureCode)));
-        if (parsed > 0) {
-            return parsed;
-        }
-        return Math.max(defaultLimit, 0);
     }
 
     private String usedField(String featureCode) {
         return featureCode + ":used";
-    }
-
-    private String limitField(String featureCode) {
-        return featureCode + ":limit";
     }
 
     private void ensureExpireIfMissing(String key, long ttlSeconds) {
