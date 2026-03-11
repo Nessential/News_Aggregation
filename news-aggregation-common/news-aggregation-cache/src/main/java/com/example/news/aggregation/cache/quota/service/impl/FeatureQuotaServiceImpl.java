@@ -99,10 +99,12 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
                         .build();
             }
 
-            String key = buildDailyKey(userId, normalizedFeature);
+            String key = buildDailyHashKey(userId);
             long ttlSeconds = secondsToMidnight();
-            redisTemplate.opsForValue().setIfAbsent(key, 0, ttlSeconds, TimeUnit.SECONDS);
-            Long after = redisTemplate.opsForValue().increment(key);
+            ensureHashInitialized(key, normalizedFeature, featureConfig.getDailyLimit(), ttlSeconds);
+            String usedField = usedField(normalizedFeature);
+            String limitField = limitField(normalizedFeature);
+            Long after = redisTemplate.opsForHash().increment(key, usedField, 1L);
             ensureExpireIfMissing(key, ttlSeconds);
 
             if (after == null) {
@@ -114,9 +116,10 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
                         .build();
             }
 
-            if (after > featureConfig.getDailyLimit()) {
+            int effectiveLimit = resolveLimit(key, normalizedFeature, featureConfig.getDailyLimit());
+            if (after > effectiveLimit) {
                 // Rollback over-consume to keep counter in sync.
-                redisTemplate.opsForValue().increment(key, -1);
+                redisTemplate.opsForHash().increment(key, usedField, -1L);
                 return FeatureQuotaConsumeResult.builder()
                         .consumed(false)
                         .reasonCode("FEATURE_QUOTA_EXCEEDED")
@@ -181,12 +184,12 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
     }
 
     private FeatureQuotaSnapshot getSnapshot(Long userId, String featureCode, FeatureQuotaProperties.FeatureConfig featureConfig) {
-        String key = buildDailyKey(userId, featureCode);
+        String key = buildDailyHashKey(userId);
         long ttlSeconds = secondsToMidnight();
-        redisTemplate.opsForValue().setIfAbsent(key, 0, ttlSeconds, TimeUnit.SECONDS);
+        ensureHashInitialized(key, featureCode, featureConfig.getDailyLimit(), ttlSeconds);
         ensureExpireIfMissing(key, ttlSeconds);
-        int used = safeToInt(redisTemplate.opsForValue().get(key));
-        int limit = Math.max(featureConfig.getDailyLimit(), 0);
+        int used = safeToInt(redisTemplate.opsForHash().get(key, usedField(featureCode)));
+        int limit = resolveLimit(key, featureCode, featureConfig.getDailyLimit());
         int remaining = Math.max(limit - used, 0);
         long expireAtEpochMs = System.currentTimeMillis() + Math.max(getTtlSeconds(key), 0) * 1000;
         return FeatureQuotaSnapshot.builder()
@@ -197,6 +200,30 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
                 .remainingCount(remaining)
                 .expireAtEpochMs(expireAtEpochMs)
                 .build();
+    }
+
+    private void ensureHashInitialized(String key, String featureCode, int defaultLimit, long ttlSeconds) {
+        redisTemplate.opsForHash().putIfAbsent(key, usedField(featureCode), 0);
+        if (defaultLimit > 0) {
+            redisTemplate.opsForHash().putIfAbsent(key, limitField(featureCode), defaultLimit);
+        }
+        ensureExpireIfMissing(key, ttlSeconds);
+    }
+
+    private int resolveLimit(String key, String featureCode, int defaultLimit) {
+        int parsed = safeToInt(redisTemplate.opsForHash().get(key, limitField(featureCode)));
+        if (parsed > 0) {
+            return parsed;
+        }
+        return Math.max(defaultLimit, 0);
+    }
+
+    private String usedField(String featureCode) {
+        return featureCode + ":used";
+    }
+
+    private String limitField(String featureCode) {
+        return featureCode + ":limit";
     }
 
     private void ensureExpireIfMissing(String key, long ttlSeconds) {
@@ -232,8 +259,8 @@ public class FeatureQuotaServiceImpl implements FeatureQuotaService {
         }
     }
 
-    private String buildDailyKey(Long userId, String featureCode) {
-        return properties.getRedisPrefix() + ":" + featureCode + ":" + userId + ":" + LocalDate.now(resolveZoneId());
+    private String buildDailyHashKey(Long userId) {
+        return properties.getRedisPrefix() + ":" + userId + ":" + LocalDate.now(resolveZoneId());
     }
 
     private String normalizeFeature(String featureCode) {

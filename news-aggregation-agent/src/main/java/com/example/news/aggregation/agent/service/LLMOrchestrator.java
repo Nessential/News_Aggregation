@@ -770,6 +770,7 @@ public class LLMOrchestrator {
                     ? TurnStatus.DONE.name()
                     : TurnStatus.FAILED.name());
         }
+        snapshot.setIdempotencyReplay(true);
         return ensureMarkdown(snapshot);
     }
 

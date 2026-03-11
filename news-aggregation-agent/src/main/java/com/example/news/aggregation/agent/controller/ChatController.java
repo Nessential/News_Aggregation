@@ -155,6 +155,16 @@ public class ChatController {
                     response.setFeatureQuotas(consumeResult.getAllQuotas());
                     log.info("[quota] \u804a\u5929\u6210\u529f\u540e\u6263\u51cf\u989d\u5ea6\u5b8c\u6210|userId={} |sessionId={} |turnId={} |reasonCode={}",
                             currentUserIdLong, request.getSessionId(), request.getTurnId(), consumeResult.getReasonCode());
+                    if (isQuotaExceededAfterConsume(consumeResult)) {
+                        AgentResponse exceedResponse = buildErrorResponse(
+                                request.getSessionId(),
+                                request.getTurnId(),
+                                consumeResult.getReasonMessage() == null ? "\u4eca\u65e5\u804a\u5929\u989d\u5ea6\u5df2\u7528\u5c3d" : consumeResult.getReasonMessage(),
+                                "FEATURE_QUOTA_EXCEEDED"
+                        );
+                        exceedResponse.setFeatureQuotas(consumeResult.getAllQuotas());
+                        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(exceedResponse);
+                    }
                 } catch (Exception ex) {
                     // Quota component exception should not break the main flow.
                     log.error("[quota] \u804a\u5929\u6210\u529f\u540e\u6263\u51cf\u989d\u5ea6\u5f02\u5e38\uff0c\u5ffd\u7565\u5e76\u7ee7\u7eed\u8fd4\u56de|userId={} |sessionId={} |turnId={}",
@@ -367,10 +377,23 @@ public class ChatController {
         if (response == null) {
             return false;
         }
+        if (Boolean.TRUE.equals(response.getIdempotencyReplay())) {
+            return false;
+        }
         if (!"DONE".equalsIgnoreCase(response.getTurnStatus())) {
             return false;
         }
         String errorCode = response.getErrorCode();
         return errorCode == null || errorCode.isBlank();
+    }
+
+    private boolean isQuotaExceededAfterConsume(FeatureQuotaConsumeResult consumeResult) {
+        if (consumeResult == null) {
+            return false;
+        }
+        if (consumeResult.isConsumed()) {
+            return false;
+        }
+        return "FEATURE_QUOTA_EXCEEDED".equalsIgnoreCase(consumeResult.getReasonCode());
     }
 }
