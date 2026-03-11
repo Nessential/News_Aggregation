@@ -16,7 +16,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessageEntity> {
             SELECT *
             FROM chat_message
             WHERE session_id = #{sessionId}
-              AND deleted = 0
             ORDER BY created_at DESC
             LIMIT #{limit}
             """)
@@ -28,7 +27,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessageEntity> {
             FROM chat_message
             WHERE session_id = #{sessionId}
               AND turn_id = #{turnId}
-              AND deleted = 0
             ORDER BY seq_no ASC
             """)
     List<ChatMessageEntity> selectBySessionIdAndTurnId(@Param("sessionId") String sessionId,
@@ -38,7 +36,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessageEntity> {
             SELECT *
             FROM chat_message
             WHERE session_id = #{sessionId}
-              AND deleted = 0
               AND turn_id != #{excludeTurnId}
             ORDER BY created_at DESC
             LIMIT #{limit}
@@ -53,7 +50,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessageEntity> {
                    MAX(created_at) AS latestAt
             FROM chat_message
             WHERE user_id = #{userId}
-              AND deleted = 0
               AND session_id IS NOT NULL
               AND session_id != ''
             GROUP BY session_id, user_id
@@ -68,7 +64,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessageEntity> {
             FROM chat_message
             WHERE session_id = #{sessionId}
               AND user_id = #{userId}
-              AND deleted = 0
             """)
     int countBySessionIdAndUserId(@Param("sessionId") String sessionId,
                                   @Param("userId") String userId);
