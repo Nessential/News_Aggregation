@@ -28,6 +28,9 @@ public class AgentResponse implements Serializable {
     /** Full merged text for logging/history. */
     private String answer;
 
+    /** Markdown-ready answer for frontend rendering. */
+    private String answerMarkdown;
+
     /** New structured answer for frontend rendering. */
     private List<AnswerItemView> answerItems;
 

@@ -9,66 +9,52 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 /**
- * 对话消息实体。
+ * Chat message entity.
  */
 @Getter
 @Setter
 @TableName("chat_message")
 public class ChatMessageEntity {
 
-    /**
-     * 消息唯一ID（雪花算法）
-     */
     @TableId(type = IdType.INPUT)
     private Long messageId;
 
-    /**
-     * 对话轮次ID
-     */
     private String turnId;
 
-    /**
-     * 会话ID
-     */
     private String sessionId;
 
-    /**
-     * 用户ID
-     */
     private String userId;
 
-    /**
-     * 请求哈希（关联幂等系统）
-     */
     private String requestHash;
 
     /**
-     * 角色: 0=用户, 1=系统
+     * 0=user, 1=assistant
      */
     private Integer role;
 
     /**
-     * 消息内容
+     * Plain text content for compatibility.
      */
     private String content;
 
     /**
-     * 状态: 0=处理中, 1=成功, 2=失败
+     * Markdown snapshot for rendering.
+     */
+    private String contentMarkdown;
+
+    /**
+     * Content format marker: PLAIN/MARKDOWN.
+     */
+    private String contentFormat;
+
+    /**
+     * 0=processing, 1=success, 2=failed
      */
     private Integer status;
 
-    /**
-     * 消息序号（用于排序）
-     */
     private Integer seqNo;
 
-    /**
-     * 创建时间
-     */
     private LocalDateTime createdAt;
 
-    /**
-     * 更新时间
-     */
     private LocalDateTime updatedAt;
 }

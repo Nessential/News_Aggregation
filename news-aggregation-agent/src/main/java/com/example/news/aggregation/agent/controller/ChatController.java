@@ -340,6 +340,7 @@ public class ChatController {
                 .turnStatus("FAILED")
                 .errorCode(errorCode)
                 .answer(errorMessage)
+                .answerMarkdown(errorMessage == null ? "" : errorMessage)
                 .timestamp(LocalDateTime.now())
                 .build();
     }
