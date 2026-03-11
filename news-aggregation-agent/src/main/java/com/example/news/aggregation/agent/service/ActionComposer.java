@@ -39,6 +39,7 @@ public class ActionComposer {
                     .map(AgentResponse.AnswerItemView::getText)
                     .filter(text -> text != null && !text.isBlank())
                     .collect(Collectors.joining("\n"));
+            String answerMarkdown = MarkdownResponseFormatter.formatAnswer(answerItems, mergedAnswer);
 
             Map<String, Object> extraData = pipelineResult.getExtraData();
             AgentResponse.ResponseMetadata metadata = AgentResponse.ResponseMetadata.builder()
@@ -68,6 +69,7 @@ public class ActionComposer {
             return AgentResponse.builder()
                     .sessionId(sessionId)
                     .answer(mergedAnswer)
+                    .answerMarkdown(answerMarkdown)
                     .answerItems(answerItems)
                     .taskFamily(taskFamily)
                     .needsClarification(false)
@@ -146,9 +148,11 @@ public class ActionComposer {
     }
 
     private AgentResponse buildErrorResponse(String sessionId, String errorMessage) {
+        String errorText = "内部错误: " + errorMessage;
         return AgentResponse.builder()
                 .sessionId(sessionId)
-                .answer("内部错误: " + errorMessage)
+                .answer(errorText)
+                .answerMarkdown(MarkdownResponseFormatter.formatPlainText(errorText))
                 .answerItems(List.of())
                 .timestamp(LocalDateTime.now())
                 .build();

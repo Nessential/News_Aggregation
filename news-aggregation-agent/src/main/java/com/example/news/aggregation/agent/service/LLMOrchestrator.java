@@ -88,17 +88,17 @@ public class LLMOrchestrator {
         IdempotencyRecord idempotencyRecord = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
         AgentResponse replay = replayFromIdempotencyRecord(sessionId, turnId, idempotencyRecord);
         if (replay != null) {
-            return replay;
+            return ensureMarkdown(replay);
         }
 
         if (!sessionManager.tryAcquireSessionLock(sessionId, turnId)) {
             IdempotencyRecord retryRecord = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
             AgentResponse retryReplay = replayFromIdempotencyRecord(sessionId, turnId, retryRecord);
             if (retryReplay != null) {
-                return retryReplay;
+                return ensureMarkdown(retryReplay);
             }
             String runningTurnId = sessionManager.getRunningTurnId(sessionId);
-            return buildBusyResponse(sessionId, turnId, runningTurnId);
+            return ensureMarkdown(buildBusyResponse(sessionId, turnId, runningTurnId));
         }
 
         try {
@@ -107,12 +107,12 @@ public class LLMOrchestrator {
                 IdempotencyRecord existing = turnManager.getIdempotencyRecord(sessionId, idempotencyKey);
                 AgentResponse existingReplay = replayFromIdempotencyRecord(sessionId, turnId, existing);
                 if (existingReplay != null) {
-                    return existingReplay;
+                    return ensureMarkdown(existingReplay);
                 }
             }
 
             turnManager.createRunningTurn(sessionId, turnId, requestHash);
-            AgentResponse response = executeSingleTurn(request, sessionState, turnId, requestHash);
+            AgentResponse response = ensureMarkdown(executeSingleTurn(request, sessionState, turnId, requestHash));
             response.setSessionId(sessionId);
             response.setTurnId(turnId);
             if (response.getTurnStatus() == null || response.getTurnStatus().isBlank()) {
@@ -126,18 +126,18 @@ public class LLMOrchestrator {
                 turnManager.markIdempotencyFailed(sessionId, idempotencyKey, turnId, errorCode, errorMessage, response);
 
                 // 保存失败消息到历史记录
-                chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, errorMessage);
+                chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, errorMessage, response.getAnswerMarkdown());
 
-                return response;
+                return ensureMarkdown(response);
             }
 
             turnManager.markTurnDone(sessionId, turnId, response);
             turnManager.markIdempotencyDone(sessionId, idempotencyKey, turnId, response);
 
             // 保存系统回答到历史记录
-            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, response.getAnswer());
+            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, response.getAnswer(), response.getAnswerMarkdown());
 
-            return response;
+            return ensureMarkdown(response);
         } catch (Exception e) {
             log.error("[turn] 执行失败|sessionId={} |turnId={}", sessionId, turnId, e);
             AgentResponse failed = AgentResponse.builder()
@@ -146,15 +146,16 @@ public class LLMOrchestrator {
                     .turnStatus(TurnStatus.FAILED.name())
                     .errorCode("TURN_EXECUTION_FAILED")
                     .answer("处理请求失败: " + e.getMessage())
+                    .answerMarkdown(MarkdownResponseFormatter.formatPlainText("处理请求失败: " + e.getMessage()))
                     .timestamp(LocalDateTime.now())
                     .build();
             turnManager.markTurnFailed(sessionId, turnId, failed.getErrorCode(), e.getMessage());
             turnManager.markIdempotencyFailed(sessionId, idempotencyKey, turnId, failed.getErrorCode(), e.getMessage(), failed);
 
             // 保存异常消息到历史记录
-            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, failed.getAnswer());
+            chatHistoryService.saveAssistantMessage(sessionId, userId, turnId, requestHash, failed.getAnswer(), failed.getAnswerMarkdown());
 
-            return failed;
+            return ensureMarkdown(failed);
         } finally {
             sessionManager.releaseSessionLock(sessionId, turnId);
         }
@@ -650,6 +651,7 @@ public class LLMOrchestrator {
                 .turnStatus(TurnStatus.FAILED.name())
                 .errorCode("BUDGET_EXHAUSTED")
                 .answer("Budget exhausted. Please create a new session.")
+                .answerMarkdown(MarkdownResponseFormatter.formatPlainText("Budget exhausted. Please create a new session."))
                 .timestamp(LocalDateTime.now())
                 .metadata(AgentResponse.ResponseMetadata.builder().remainingBudget(0).build())
                 .build();
@@ -661,6 +663,7 @@ public class LLMOrchestrator {
                 .turnId(turnId)
                 .turnStatus(TurnStatus.DONE.name())
                 .answer("I need more information to continue.")
+                .answerMarkdown(MarkdownResponseFormatter.formatPlainText("I need more information to continue."))
                 .needsClarification(true)
                 .clarificationPrompt(routerResult.getClarificationQuestion())
                 .timestamp(LocalDateTime.now())
@@ -767,7 +770,17 @@ public class LLMOrchestrator {
                     ? TurnStatus.DONE.name()
                     : TurnStatus.FAILED.name());
         }
-        return snapshot;
+        return ensureMarkdown(snapshot);
+    }
+
+    private AgentResponse ensureMarkdown(AgentResponse response) {
+        if (response == null) {
+            return null;
+        }
+        if (response.getAnswerMarkdown() == null || response.getAnswerMarkdown().isBlank()) {
+            response.setAnswerMarkdown(MarkdownResponseFormatter.formatPlainText(response.getAnswer()));
+        }
+        return response;
     }
 
     private Map<String, Object> buildFilters(RouterResult routerResult) {
