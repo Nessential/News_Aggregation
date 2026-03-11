@@ -28,7 +28,16 @@ public class RssSourceProperties {
         /** RSS 地址 */
         private String url;
 
+        /** 分类ID */
+        private Long categoryId;
+
         /** 分类名称 */
         private String category;
+
+        /** 当前源的默认图片 URL（当条目无图时使用） */
+        private String defaultImageUrl;
+
+        /** 当前源单次抓取条数上限（为空或<=0表示不限制） */
+        private Integer maxItems;
     }
 }

@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: news-aggregation-llm-spring-ai
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+      - optional:file:../../.env[.properties]
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:your-api-key-here}
@@ -19,13 +24,17 @@ spring:
       mcp:
         server:
           enabled: true
-          server-addr: ${NACOS_ADDR:localhost:8848}
-          namespace: news-agent
-          group-id: MCP_TOOLS
+          server-addr: ${NACOS_ADDR:localhost:8849}
+          username: ${NACOS_USERNAME:}
+          password: ${NACOS_PASSWORD:}
+          namespace: ${NACOS_NAMESPACE:news-agent}
+          group-id: ${NACOS_MCP_GROUP_ID:MCP_TOOLS}
         client:
           enabled: true
-          server-addr: ${NACOS_ADDR:localhost:8848}
-          namespace: news-agent
+          server-addr: ${NACOS_ADDR:localhost:8849}
+          username: ${NACOS_USERNAME:}
+          password: ${NACOS_PASSWORD:}
+          namespace: ${NACOS_NAMESPACE:news-agent}
 
 # LLM应用配置
 app:
@@ -110,7 +119,9 @@ dubbo:
     name: tri
     port: ${DUBBO_PORT:20881}
   registry:
-    address: nacos://${NACOS_ADDR:localhost:8848}
+    address: nacos://${NACOS_ADDR:localhost:8849}
+    username: ${NACOS_USERNAME:}
+    password: ${NACOS_PASSWORD:}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
   provider:

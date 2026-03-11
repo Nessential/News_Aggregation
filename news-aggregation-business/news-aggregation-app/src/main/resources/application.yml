@@ -1,4 +1,4 @@
-﻿spring:
+spring:
   application:
     name: news-aggregation-app
   config:
@@ -18,14 +18,14 @@
       - classpath:vector.yml
 
 server:
-  port: 8080
+  port: 8092
 
 
 app:
   cors:
     enabled: ${APP_CORS_ENABLED:false}
 
-# MyBatis閰嶇疆
+# MyBatis
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
 
@@ -36,11 +36,12 @@ dubbo:
     name: tri
     port: ${DUBBO_PORT:20880}
   registry:
-    address: nacos://${NACOS_ADDR:localhost:8848}
+    address: nacos://${NACOS_ADDR:localhost:8849}
+    username: ${NACOS_USERNAME:}
+    password: ${NACOS_PASSWORD:}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
   provider:
     filter: userContextProvider
   consumer:
     check: false
-

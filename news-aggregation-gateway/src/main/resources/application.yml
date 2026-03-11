@@ -1,13 +1,19 @@
 server:
-  port: 8088
+  port: 8091
 
 spring:
   application:
     name: news-aggregation-gateway
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+      - optional:file:../../.env[.properties]
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
       password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 3000ms
@@ -28,11 +34,11 @@ spring:
                 allowedHeaders: "*"
       routes:
         - id: user-auth-api
-          uri: http://localhost:8080
+          uri: http://localhost:8092
           predicates:
             - Path=/api/user/auth/**
         - id: news-api
-          uri: http://localhost:8080
+          uri: http://localhost:8092
           predicates:
             - Path=/api/news/**
         - id: agent-api
