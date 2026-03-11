@@ -24,6 +24,10 @@ public class AgentResponse implements Serializable {
     private String turnStatus;
     private String errorCode;
     private String runningTurnId;
+    /**
+     * Whether this response is replayed from idempotency snapshot.
+     */
+    private Boolean idempotencyReplay;
 
     /** Full merged text for logging/history. */
     private String answer;
