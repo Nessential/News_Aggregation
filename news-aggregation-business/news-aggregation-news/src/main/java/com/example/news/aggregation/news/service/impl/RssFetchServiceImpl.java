@@ -66,20 +66,24 @@ public class RssFetchServiceImpl implements RssFetchService {
 
     private int fetchSingleSource(RssSourceProperties.RssSource source) {
         log.info("开始抓取 RSS 源: {}", source.getName());
-        List<News> newsList = rssParser.parse(source.getUrl(), source.getName(), source.getCategory());
+        List<News> newsList = rssParser.parse(
+                source.getUrl(),
+                source.getName(),
+                source.getCategory(),
+                source.getDefaultImageUrl()
+        );
+        newsList = applySourceFetchLimit(newsList, source);
 
-        Long categoryId = resolveCategoryId(source.getCategory());
+        Long categoryId = resolveCategoryId(source.getCategoryId(), source.getCategory());
         int saved = 0;
 
         for (News news : newsList) {
             try {
-                // URL 命中过滤关键词时直接跳过（不抓正文、不入库）
                 if (shouldSkipByUrl(news.getLink())) {
                     log.info("URL 命中过滤关键词，跳过抓取: {}", news.getLink());
                     continue;
                 }
 
-                // 去重
                 News existed = newsMapper.selectByLink(news.getLink());
                 if (existed != null) {
                     log.debug("新闻已存在，跳过: {}", news.getLink());
@@ -89,15 +93,12 @@ public class RssFetchServiceImpl implements RssFetchService {
                 news.setCategory_id(categoryId);
                 news.setCategory(source.getCategory());
 
-                // 保存图片
                 String originImageUrl = news.getImage_url();
                 String finalImageUrl = storageService.uploadFromUrl(originImageUrl, source.getName(), news.getTitle());
                 news.setImage_url(finalImageUrl);
 
-                // 抓取正文
                 fetchNewsContent(news);
 
-                // 初始化翻译状态
                 news.setTranslation_status(0);
                 newsMapper.insert(news);
                 saved++;
@@ -111,9 +112,50 @@ public class RssFetchServiceImpl implements RssFetchService {
     }
 
     /**
-     * 解析分类 ID，不存在时自动创建分类。
+     * 按源配置限制单次抓取条数。
      */
-    private Long resolveCategoryId(String categoryName) {
+    private List<News> applySourceFetchLimit(List<News> newsList, RssSourceProperties.RssSource source) {
+        if (newsList == null || newsList.isEmpty()) {
+            return newsList;
+        }
+        Integer maxItems = source.getMaxItems();
+        if (maxItems == null || maxItems <= 0) {
+            return newsList;
+        }
+        if (newsList.size() <= maxItems) {
+            return newsList;
+        }
+        log.info("RSS 源 {} 启用条数限制：{} -> {}", source.getName(), newsList.size(), maxItems);
+        return newsList.subList(0, maxItems);
+    }
+
+    /**
+     * 解析分类 ID：优先使用配置中的 categoryId，其次按分类名称解析。
+     */
+    private Long resolveCategoryId(Long configuredCategoryId, String categoryName) {
+        if (configuredCategoryId != null) {
+            NewsCategory byId = newsCategoryMapper.selectById(configuredCategoryId);
+            if (byId != null) {
+                return configuredCategoryId;
+            }
+            if (categoryName != null && !categoryName.isBlank()) {
+                try {
+                    NewsCategory category = new NewsCategory();
+                    category.setId(configuredCategoryId);
+                    category.setName(categoryName);
+                    newsCategoryMapper.insert(category);
+                    log.info("自动创建新闻分类成功: id={}, name={}", configuredCategoryId, categoryName);
+                    return configuredCategoryId;
+                } catch (DuplicateKeyException ex) {
+                    NewsCategory retryById = newsCategoryMapper.selectById(configuredCategoryId);
+                    if (retryById != null) {
+                        return configuredCategoryId;
+                    }
+                }
+            }
+            return configuredCategoryId;
+        }
+
         if (categoryName == null || categoryName.isBlank()) {
             return null;
         }
@@ -130,7 +172,6 @@ public class RssFetchServiceImpl implements RssFetchService {
             log.info("自动创建新闻分类成功: name={}, id={}", categoryName, category.getId());
             return category.getId();
         } catch (DuplicateKeyException ex) {
-            // 并发场景下可能由其他线程先创建，回查即可
             NewsCategory category = newsCategoryMapper.selectOne(
                     Wrappers.<NewsCategory>lambdaQuery()
                             .eq(NewsCategory::getName, categoryName)

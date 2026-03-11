@@ -1,32 +1,30 @@
-# Spring Redis配置（从 base.yml 引用）
+# Spring Redis config (unified env-driven keys)
 spring:
-  redis:
-    host: ${news.aggregation.redis.host}
-    port: ${news.aggregation.redis.port}
-    password: ${news.aggregation.redis.password}
-    database: 0
-    timeout: 2000ms
-    lettuce:
-      pool:
-        max-active: 200
-        max-idle: 50
-        min-idle: 10
-        max-wait: -1ms
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: ${REDIS_TIMEOUT:2000ms}
+      lettuce:
+        pool:
+          max-active: 200
+          max-idle: 50
+          min-idle: 10
+          max-wait: -1ms
 
-# JetCache配置
+# JetCache config
 jetcache:
   statIntervalMinutes: 15
   hidePackages: com.example
-  
-  # 本地缓存（Caffeine）
   local:
     default:
       type: caffeine
       limit: 1000
       keyConvertor: fastjson2
       expireAfterWriteInMillis: 300000
-  
-  # 远程缓存（Redis）
   remote:
     default:
       type: redisson
@@ -37,4 +35,4 @@ jetcache:
         minIdle: 5
         maxIdle: 20
         maxTotal: 50
-      keyPrefix: 'agent:'
+      keyPrefix: "agent:"

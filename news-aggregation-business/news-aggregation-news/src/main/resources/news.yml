@@ -9,19 +9,70 @@ news:
     sources:
       - name: BBC
         url: https://feeds.bbci.co.uk/news/rss.xml
+        category-id: 1
         category: Hot
+        max-items: 1
       - name: BBC
         url: https://feeds.bbci.co.uk/news/world/rss.xml
+        category-id: 2
         category: world
+        max-items: 1
       - name: BBC
         url: https://feeds.bbci.co.uk/news/business/rss.xml
+        category-id: 3
         category: business
+        max-items: 1
       - name: BBC
         url: https://feeds.bbci.co.uk/news/politics/rss.xml
+        category-id: 4
         category: politics
+        max-items: 1
       - name: BBC
         url: https://feeds.bbci.co.uk/news/technology/rss.xml
+        category-id: 5
         category: technology
+        max-items: 1
+      - name: ABC
+        url: https://feeds.abcnews.com/abcnews/topstories
+        category-id: 1
+        category: Hot
+        max-items: 1
+      - name: ABC
+        url: https://abcnews.com/abcnews/internationalheadlines
+        category-id: 2
+        category: world
+        max-items: 1
+      - name: ABC
+        url: https://abcnews.com/abcnews/politicsheadlines
+        category-id: 4
+        category: politics
+        max-items: 1
+      - name: ABC
+        url: https://abcnews.com/abcnews/moneyheadlines
+        category-id: 3
+        category: business
+        max-items: 1
+      - name: ABC
+        url: https://abcnews.com/abcnews/technologyheadlines
+        category-id: 5
+        category: technology
+        max-items: 1
+      - name: TheVerge
+        url: https://www.theverge.com/rss/partner/subscriber-only-full-feed/rss.xml
+        category-id: 5
+        category: technology
+        max-items: 1
+      - name: Engadget
+        url: https://www.engadget.com/rss.xml
+        category-id: 5
+        category: technology
+        max-items: 1
+      - name: Al Jazeera
+        url: https://www.aljazeera.com/xml/rss/all.xml
+        category-id: 2
+        category: world
+        default-image-url: https://www.aljazeera.com/images/logo_aje.png
+        max-items: 1
 
 # 百度翻译配置
 translate:

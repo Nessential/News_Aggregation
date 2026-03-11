@@ -6,7 +6,11 @@ spring:
     name: news-aggregation-agent
   config:
     import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+      - optional:file:../../.env[.properties]
       - classpath:base.yml
+      - classpath:cache.yml
       - classpath:datasource.yml
   ai:
     dashscope:
@@ -14,23 +18,8 @@ spring:
       chat:
         model: qwen3.5-plus
         temperature: 0.7
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      database: 0
-      timeout: 3000ms
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
-          max-wait: -1ms
 
-# Embedding 配置
 embedding:
-  zhipu:
     api-key: ${ZHIPU_API_KEY}
     base-url: https://open.bigmodel.cn/api/paas/v4
     model: embedding-3
@@ -74,8 +63,8 @@ app:
     enabled: ${APP_RPC_ENABLED:true}
   news:
     retrieval:
-      base-url: http://localhost:8080
-    base-url: http://localhost:8080
+      base-url: http://localhost:8092
+    base-url: http://localhost:8092
 
   llm:
     mock-mode: false
@@ -232,7 +221,9 @@ dubbo:
     name: tri
     port: -1
   registry:
-    address: nacos://${NACOS_ADDR:localhost:8848}
+    address: nacos://${NACOS_ADDR:localhost:8849}
+    username: ${NACOS_USERNAME:}
+    password: ${NACOS_PASSWORD:}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
   consumer:

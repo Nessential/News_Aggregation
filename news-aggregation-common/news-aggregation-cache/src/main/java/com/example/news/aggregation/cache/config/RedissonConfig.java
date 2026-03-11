@@ -24,6 +24,9 @@ public class RedissonConfig {
     @Value("${spring.data.redis.password:${spring.redis.password:}}")
     private String password;
 
+    @Value("${spring.data.redis.username:${spring.redis.username:}}")
+    private String username;
+
     @Value("${spring.data.redis.database:${spring.redis.database:0}}")
     private Integer database;
 
@@ -36,7 +39,7 @@ public class RedissonConfig {
         config.setLockWatchdogTimeout(watchdogTimeoutMs);
 
         String address = "redis://" + host + ":" + port;
-        config.useSingleServer()
+        var singleServer = config.useSingleServer()
                 .setAddress(address)
                 .setPassword(password == null || password.isBlank() ? null : password)
                 .setDatabase(database)
@@ -45,7 +48,10 @@ public class RedissonConfig {
                 .setRetryAttempts(3)
                 .setRetryInterval(1500);
 
+        if (username != null && !username.isBlank()) {
+            singleServer.setUsername(username);
+        }
+
         return Redisson.create(config);
     }
 }
-

@@ -8,9 +8,10 @@ news:
       password: wangchuan
     # Redis配置
     redis:
-      host: 127.0.0.1
-      port: 6379
-      password: ''
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
     # XXL-Job配置
     xxl-job:
       admin-addresses: http://127.0.0.1:8090/xxl-job-admin
