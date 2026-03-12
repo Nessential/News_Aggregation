@@ -5,6 +5,8 @@ import com.example.news.aggregation.agent.execution.config.ReplanControlProperti
 import com.example.news.aggregation.agent.execution.domain.ExecutionEffectLatchEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionRunEntity;
 import com.example.news.aggregation.agent.execution.domain.ExecutionStepRunEntity;
+import com.example.news.aggregation.agent.client.LlmMetricsContext;
+import com.example.news.aggregation.agent.client.RetrievalMetricsContext;
 import com.example.news.aggregation.agent.execution.enums.EffectStatus;
 import com.example.news.aggregation.agent.execution.enums.RunStatus;
 import com.example.news.aggregation.agent.execution.enums.StepStatus;
@@ -286,6 +288,9 @@ public class WorkflowOrchestrator {
                              List<String> completed,
                              List<String> failed,
                              boolean failFast) {
+        String traceId = resolveMetricsTraceId(context);
+        RetrievalMetricsContext.bindTrace(traceId);
+        LlmMetricsContext.bindTrace(traceId);
         String runId = context.getRunId();
         String stepId = step.getStepId();
 
@@ -488,7 +493,21 @@ public class WorkflowOrchestrator {
             }
         } finally {
             heartbeat.stop();
+            RetrievalMetricsContext.unbindTrace();
+            LlmMetricsContext.unbindTrace();
         }
+    }
+
+    private String resolveMetricsTraceId(WorkflowContext context) {
+        if (context == null || context.getAttributes() == null) {
+            return "UNKNOWN";
+        }
+        Object turnId = context.getAttributes().get("turnId");
+        if (turnId == null) {
+            return "UNKNOWN";
+        }
+        String value = String.valueOf(turnId).trim();
+        return value.isEmpty() ? "UNKNOWN" : value;
     }
 
     private void handleUnclaimedStep(String runId,

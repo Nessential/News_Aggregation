@@ -62,15 +62,18 @@ public class PlannerClient {
 
     public ExecutionPlan plan(PlanRequest request) {
         if (rpcEnabled) {
+            long rpcStartNs = System.nanoTime();
             try {
                 com.example.news.aggregation.rpc.contract.PlanRequest rpcRequest =
                         objectMapper.convertValue(request, com.example.news.aggregation.rpc.contract.PlanRequest.class);
                 com.example.news.aggregation.rpc.contract.ExecutionPlan rpcPlan = llmPlannerRpcService.plan(rpcRequest);
+                logLlmElapsed("RPC", request, rpcStartNs, true, 1);
                 ExecutionPlan plan = objectMapper.convertValue(rpcPlan, ExecutionPlan.class);
                 if (plan != null) {
                     return plan;
                 }
             } catch (Exception e) {
+                logLlmElapsed("RPC", request, rpcStartNs, false, 1);
                 log.warn("[planner] rpc failed, fallback to http. error={}", e.getMessage());
             }
         }
@@ -78,11 +81,14 @@ public class PlannerClient {
         String url = llmBaseUrl + "/api/graph/plan";
         Exception lastException = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            long httpStartNs = System.nanoTime();
             try {
                 ResponseEntity<ExecutionPlan> response =
                         restTemplate.postForEntity(url, request, ExecutionPlan.class);
+                logLlmElapsed("HTTP", request, httpStartNs, true, attempt);
                 return response.getBody();
             } catch (Exception e) {
+                logLlmElapsed("HTTP", request, httpStartNs, false, attempt);
                 lastException = e;
                 if (attempt < MAX_ATTEMPTS) {
                     long delay = INITIAL_DELAY_MS * (1L << (attempt - 1));
@@ -98,6 +104,48 @@ public class PlannerClient {
         log.warn("[planner] all retries failed, fallback plan. error={}",
                 lastException == null ? "unknown" : lastException.getMessage());
         return buildFallbackPlan(request);
+    }
+
+    private void logLlmElapsed(String channel, PlanRequest request, long startNs, boolean success, int attempt) {
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000;
+        LlmMetricsContext.CallIndex idx = LlmMetricsContext.recordPlan(elapsedMs);
+        String query = request == null ? null : request.getQuery();
+        String schema = request == null ? null : request.getPlanSchema();
+        log.info("大模型调用耗时|callNo={} |phaseCallNo={} |phase=计划生成 |channel={} |attempt={} |schema={} |query={} |elapsedSec={} |success={}",
+                idx.callNo(),
+                idx.phaseCallNo(),
+                channel,
+                attempt,
+                schema,
+                querySummary(query),
+                formatSeconds(elapsedMs),
+                success);
+        log.info("[llm-timing] phase=plan |channel={} |attempt={} |schema={} |query={} |elapsedSec={} |success={}",
+                channel,
+                attempt,
+                schema,
+                querySummary(query),
+                formatSeconds(elapsedMs),
+                success);
+    }
+
+    private String querySummary(String query) {
+        if (query == null) {
+            return "null";
+        }
+        String compact = query.replaceAll("\\s+", " ").trim();
+        return "len=" + compact.length() + ",value=" + truncate(compact, 120);
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || maxLength <= 0) {
+            return "";
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private String formatSeconds(long elapsedMs) {
+        return String.format("%.3f", elapsedMs / 1000.0);
     }
 
     private ExecutionPlan buildFallbackPlan(PlanRequest request) {

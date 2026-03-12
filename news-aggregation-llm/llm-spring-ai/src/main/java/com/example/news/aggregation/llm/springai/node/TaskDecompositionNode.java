@@ -22,11 +22,11 @@ import java.util.Map;
 public class TaskDecompositionNode {
 
     private static final String TOOL_DESCRIPTIONS =
-            "- search_news：ES 关键词检索，适合精确词语匹配，返回按相关性排序的文章列表\n" +
-            "- retrieve_news：向量语义检索，适合模糊语义相关，返回语义相近的文章列表\n" +
-            "- hybrid_retrieve_news：混合检索（向量+关键词+RRF融合），适合复杂场景，效果最佳但耗时较长\n" +
-            "- rerank_results：MMR 重排，对已有检索结果去重并提升多样性，必须在检索步骤之后使用\n" +
-            "- llm_generate：基于已有证据生成最终答案，必须是最后一步且依赖前序检索结果";
+            "- search_news：ES 关键词检索。适合精确匹配：人名/机构名/产品名/地点、明确事件词、明确时间范围过滤；优势是精确命中和可解释性。\n" +
+            "- retrieve_news：向量语义检索。适合抽象问法、同义改写、概念描述、跨表述匹配；优势是语义召回，弱项是精确词过滤。\n" +
+            "- hybrid_retrieve_news：混合检索（向量+关键词+RRF融合）。适合新闻问答默认检索、复杂多实体问题、既要语义覆盖又要精确命中的场景，通常优先级高于单一路径。\n" +
+            "- rerank_results：MMR 重排。对检索结果去重和提升多样性，必须在检索步骤之后使用。\n" +
+            "- llm_generate：基于已有证据生成最终答案，必须是最后一步且依赖前序检索结果。";
 
     private static final String PLANNING_CONSTRAINTS =
             "1. llm_generate 必须是最后一步，且必须依赖至少一个检索步骤。\n" +
@@ -35,7 +35,10 @@ public class TaskDecompositionNode {
             "4. 步骤数量控制在 2~6 步，不要过度拆分。\n" +
             "5. requiredTools 中的工具名必须来自上方可用工具列表。\n" +
             "6. 如果查询涉及多个实体（如\"中国和美国\"），必须为每个实体生成独立的检索任务，然后合并结果。\n" +
-            "7. 多实体查询的检索策略：每个实体单独检索 -> 合并去重 -> 生成答案。";
+            "7. 多实体查询的检索策略：每个实体单独检索 -> 合并去重 -> 生成答案。\n" +
+            "8. 新闻问答默认优先使用 hybrid_retrieve_news；若问题包含精确实体或时间过滤，可补充 search_news 并在后续合并。\n" +
+            "9. 当查询语义模糊、概念化、同义改写明显时，不要只用 search_news，至少包含一次 retrieve_news 或 hybrid_retrieve_news。\n" +
+            "10. 当查询同时包含“精确实体约束 + 语义背景问题”时，优先规划为“search_news + hybrid_retrieve_news”双检索路径。";
 
     private final ChatClient chatClient;
 
