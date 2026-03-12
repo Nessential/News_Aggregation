@@ -14,18 +14,18 @@ spring:
       - classpath:datasource.yml
   ai:
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:mock-key}
+      api-key: ${DASHSCOPE_API_KEY:}
       chat:
-        model: qwen3.5-plus
-        temperature: 0.7
+        model: ${DASHSCOPE_AGENT_CHAT_MODEL:qwen3.5-plus}
+        temperature: ${DASHSCOPE_AGENT_CHAT_TEMPERATURE:0.7}
 
 embedding:
     api-key: ${ZHIPU_API_KEY}
-    base-url: https://open.bigmodel.cn/api/paas/v4
-    model: embedding-3
-    dimensions: 2048
-    connect-timeout: 10000
-    read-timeout: 30000
+    base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    model: ${ZHIPU_EMBEDDING_MODEL:embedding-3}
+    dimensions: ${ZHIPU_EMBEDDING_DIMENSIONS:2048}
+    connect-timeout: ${ZHIPU_CONNECT_TIMEOUT:10000}
+    read-timeout: ${ZHIPU_READ_TIMEOUT:30000}
     chunk-size: 500
     chunk-overlap: 50
     min-chunk-size: 100

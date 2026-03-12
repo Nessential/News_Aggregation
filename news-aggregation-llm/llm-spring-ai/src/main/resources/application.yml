@@ -11,13 +11,13 @@ spring:
       - optional:file:../../.env[.properties]
   ai:
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:your-api-key-here}
+      api-key: ${DASHSCOPE_API_KEY:}
       chat:
-        model: qwen3.5-flash
-        temperature: 0.7
-        max-tokens: 10000
+        model: ${DASHSCOPE_CHAT_MODEL:qwen3.5-flash}
+        temperature: ${DASHSCOPE_CHAT_TEMPERATURE:0.7}
+        max-tokens: ${DASHSCOPE_CHAT_MAX_TOKENS:10000}
       embedding:
-        model: text-embedding-v2
+        model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v2}
 
     # Nacos MCP配置（预留，MVP未启用）
     nacos:
