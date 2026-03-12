@@ -11,7 +11,9 @@ import java.util.Map;
 
 /**
  * 资源估算节点。
- * 从配置读取 taskType 对应的耗时与工具，减少硬编码改动成本。
+ * <p>
+ * 节点会补充每个子任务的预计耗时和默认工具，
+ * 但不会覆盖模型已经明确选定的工具。
  */
 @Slf4j
 @Component
@@ -20,9 +22,6 @@ public class ResourceEstimationNode {
 
     private final PlannerResourceEstimationProperties properties;
 
-    /**
-     * 执行资源估算。
-     */
     public PlannerState execute(PlannerState state) {
         state.incrementStep();
 
@@ -37,12 +36,14 @@ public class ResourceEstimationNode {
         for (PlannerState.SubTask task : subTasks) {
             String taskType = task.getType();
             Integer estimated = typeTimeMap != null ? typeTimeMap.get(taskType) : null;
-            List<String> tools = typeToolsMap != null ? typeToolsMap.get(taskType) : null;
+            List<String> defaultTools = typeToolsMap != null ? typeToolsMap.get(taskType) : null;
 
             task.setEstimatedTime(estimated != null ? estimated : 5);
-            task.setRequiredTools(tools != null ? tools : List.of());
+            if (task.getRequiredTools() == null || task.getRequiredTools().isEmpty()) {
+                task.setRequiredTools(defaultTools != null ? defaultTools : List.of());
+            }
 
-            log.debug("[planner] 资源估算|taskId={} |taskType={} |estimatedTime={} |requiredTools={}",
+            log.debug("[任务规划] 资源估算完成。taskId={}，taskType={}，estimatedTime={}，requiredTools={}",
                     task.getId(), taskType, task.getEstimatedTime(), task.getRequiredTools());
         }
 

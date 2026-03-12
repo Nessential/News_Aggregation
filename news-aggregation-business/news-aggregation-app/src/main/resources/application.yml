@@ -41,6 +41,7 @@ dubbo:
     password: ${NACOS_PASSWORD:}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
+      register-consumer-url: true
   provider:
     filter: userContextProvider
   consumer:

@@ -58,7 +58,7 @@ app:
     features:
       chat:
         enabled: ${APP_FEATURE_QUOTA_CHAT_ENABLED:true}
-        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:1}
+        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:5}
   rpc:
     enabled: ${APP_RPC_ENABLED:true}
   news:
@@ -226,6 +226,7 @@ dubbo:
     password: ${NACOS_PASSWORD:}
     parameters:
       namespace: ${NACOS_NAMESPACE:news-agent}
+      register-consumer-url: true
   consumer:
     filter: userContextConsumer
     check: false

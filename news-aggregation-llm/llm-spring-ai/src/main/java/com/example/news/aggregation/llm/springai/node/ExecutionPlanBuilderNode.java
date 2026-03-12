@@ -22,27 +22,26 @@ import java.util.UUID;
 
 /**
  * 执行计划构建节点。
- * 将子任务与依赖关系转换为统一 ExecutionPlan 契约。
+ * <p>
+ * 该节点负责将子任务列表和依赖关系转换为统一的 {@link ExecutionPlan}，
+ * 供 agent 执行层直接消费。
  */
 @Slf4j
 @Component
 public class ExecutionPlanBuilderNode {
 
-    /**
-     * 将前置节点输出的子任务与依赖关系组装为 ExecutionPlan。
-     */
     public PlannerState execute(PlannerState state) {
         state.incrementStep();
 
         List<PlannerState.SubTask> subTasks = state.getSubTasks();
         Map<String, List<String>> dependencies = state.getDependencies();
-        log.info("[planner] 进入执行计划构建|query={} |subTaskCount={} |hasDependencies={}",
+        log.info("[执行计划构建] 开始构建执行计划。query={}，subTaskCount={}，hasDependencies={}",
                 state.getQuery(),
                 subTasks == null ? 0 : subTasks.size(),
                 dependencies != null && !dependencies.isEmpty());
 
         if (subTasks == null || subTasks.isEmpty()) {
-            log.warn("[planner] 子任务为空，返回空执行计划|query={}", state.getQuery());
+            log.warn("[执行计划构建] 子任务为空，返回空执行计划。query={}", state.getQuery());
             state.setExecutionPlan(emptyPlan(state));
             return state;
         }
@@ -62,13 +61,14 @@ public class ExecutionPlanBuilderNode {
             if (subTask == null) {
                 continue;
             }
-            List<String> deps = subTask.getDependencies() != null ? subTask.getDependencies() : List.of();
+
+            List<String> dependsOn = subTask.getDependencies() != null ? subTask.getDependencies() : List.of();
             steps.add(ExecutionStep.builder()
                     .stepId(subTask.getId())
                     .name(subTask.getDescription())
                     .type(subTask.getType())
-                    .tool(resolveTool(state, subTask))
-                    .dependsOn(deps)
+                    .tool(resolveTool(subTask))
+                    .dependsOn(dependsOn)
                     .input(subTask.getParameters())
                     .outputSchema(defaultOutputSchema(subTask.getType()))
                     .doneCheck(defaultDoneCheck(subTask.getType()))
@@ -78,9 +78,9 @@ public class ExecutionPlanBuilderNode {
                     .timeoutMs(resolveTimeout(subTask))
                     .build());
 
-            for (String dep : deps) {
+            for (String dependency : dependsOn) {
                 edges.add(ExecutionEdge.builder()
-                        .fromStepId(dep)
+                        .fromStepId(dependency)
                         .toStepId(subTask.getId())
                         .condition("on_success")
                         .build());
@@ -92,12 +92,9 @@ public class ExecutionPlanBuilderNode {
         metadata.put("executionOrder", executionOrder);
         metadata.put("parallelizable", isParallelizable(dependencies));
 
-        String planId = "plan-" + UUID.randomUUID().toString().replace("-", "");
-        String traceId = "trace-" + UUID.randomUUID().toString().replace("-", "");
-
         ExecutionPlan plan = ExecutionPlan.builder()
-                .planId(planId)
-                .plannerTraceId(traceId)
+                .planId("plan-" + UUID.randomUUID().toString().replace("-", ""))
+                .plannerTraceId("trace-" + UUID.randomUUID().toString().replace("-", ""))
                 .goal(state.getQuery())
                 .schemaVersion("execution-plan/1.0")
                 .semanticVersion(state.getSemanticVersion() != null ? state.getSemanticVersion() : "1.0.0")
@@ -112,8 +109,9 @@ public class ExecutionPlanBuilderNode {
                 .metadata(metadata)
                 .build();
 
-        log.info("[planner] 执行计划构建完成|planId={} |traceId={} |stepCount={} |edgeCount={} |executionOrder={}",
+        log.info("[执行计划构建] 构建完成。planId={}，traceId={}，stepCount={}，edgeCount={}，executionOrder={}",
                 plan.getPlanId(), plan.getPlannerTraceId(), steps.size(), edges.size(), executionOrder);
+        log.info("[执行计划构建] 最终执行步骤摘要={}", summarizeSteps(steps));
         state.setExecutionPlan(plan);
         return state;
     }
@@ -136,69 +134,30 @@ public class ExecutionPlanBuilderNode {
                 .build();
     }
 
-    private String resolveTool(PlannerState state, PlannerState.SubTask subTask) {
-        String bindingMode = resolveToolBindingMode(state);
-        boolean springToolMode = "spring_tool".equalsIgnoreCase(bindingMode);
-
+    private String resolveTool(PlannerState.SubTask subTask) {
         if (subTask.getRequiredTools() != null && !subTask.getRequiredTools().isEmpty()) {
-            String requiredTool = subTask.getRequiredTools().get(0);
-            String selected = applyBindingModeToolAlias(state, subTask, requiredTool, springToolMode);
-            log.debug("[planner] 使用预估工具|taskId={} |bindingMode={} |tool={}",
-                    subTask.getId(), bindingMode, selected);
-            return selected;
+            String tool = subTask.getRequiredTools().get(0);
+            log.debug("[执行计划构建] 使用模型指定工具。taskId={}，taskType={}，tool={}",
+                    subTask.getId(), subTask.getType(), tool);
+            return tool;
         }
 
-        String resolved = switch (subTask.getType()) {
+        String taskType = subTask.getType();
+        String resolved = switch (taskType) {
             case "SEARCH" -> "search_news";
             case "RETRIEVE" -> "retrieve_news";
+            case "RERANK" -> "rerank_results";
             default -> "llm_generate";
         };
-        resolved = applyBindingModeToolAlias(state, subTask, resolved, springToolMode);
-        log.debug("[planner] 使用默认工具映射|taskId={} |taskType={} |bindingMode={} |tool={}",
-                subTask.getId(), subTask.getType(), bindingMode, resolved);
+        log.debug("[执行计划构建] 使用默认工具映射。taskId={}，taskType={}，tool={}",
+                subTask.getId(), taskType, resolved);
         return resolved;
-    }
-
-    private String applyBindingModeToolAlias(PlannerState state,
-                                             PlannerState.SubTask subTask,
-                                             String defaultTool,
-                                             boolean springToolMode) {
-        if (!springToolMode || subTask == null || subTask.getType() == null) {
-            return defaultTool;
-        }
-        if ("RETRIEVE".equalsIgnoreCase(subTask.getType()) && isHybridRetrieve(state, subTask)) {
-            return "hybrid_retrieve_news";
-        }
-        return defaultTool;
-    }
-
-    private boolean isHybridRetrieve(PlannerState state, PlannerState.SubTask subTask) {
-        Object mode = subTask.getParameters() == null ? null : subTask.getParameters().get("mode");
-        if (mode != null) {
-            return "HYBRID".equalsIgnoreCase(String.valueOf(mode));
-        }
-        if (state != null && state.getRouterResult() != null && state.getRouterResult().getRetrievalMode() != null) {
-            return "HYBRID".equalsIgnoreCase(state.getRouterResult().getRetrievalMode());
-        }
-        return true;
-    }
-
-    private String resolveToolBindingMode(PlannerState state) {
-        if (state == null || state.getContext() == null) {
-            return "legacy";
-        }
-        Object raw = state.getContext().get("toolBindingMode");
-        if (raw == null) {
-            return "legacy";
-        }
-        String mode = String.valueOf(raw).trim().toLowerCase();
-        return mode.isEmpty() ? "legacy" : mode;
     }
 
     private Map<String, Object> defaultOutputSchema(String taskType) {
         Map<String, Object> schema = new HashMap<>();
         schema.put("type", "object");
-        if ("SEARCH".equals(taskType) || "RETRIEVE".equals(taskType)) {
+        if ("SEARCH".equals(taskType) || "RETRIEVE".equals(taskType) || "RERANK".equals(taskType)) {
             schema.put("required", List.of("items"));
         } else {
             schema.put("required", List.of("answer"));
@@ -207,7 +166,7 @@ public class ExecutionPlanBuilderNode {
     }
 
     private DoneCheckRule defaultDoneCheck(String taskType) {
-        if ("SEARCH".equals(taskType) || "RETRIEVE".equals(taskType)) {
+        if ("SEARCH".equals(taskType) || "RETRIEVE".equals(taskType) || "RERANK".equals(taskType)) {
             return DoneCheckRule.builder()
                     .requiredFields(List.of("items"))
                     .minEvidenceCount(1)
@@ -240,7 +199,7 @@ public class ExecutionPlanBuilderNode {
     }
 
     private ExecutionEnums.SideEffectType resolveSideEffect(PlannerState.SubTask subTask) {
-        if ("SEARCH".equals(subTask.getType()) || "RETRIEVE".equals(subTask.getType())) {
+        if ("SEARCH".equals(subTask.getType()) || "RETRIEVE".equals(subTask.getType()) || "RERANK".equals(subTask.getType())) {
             return ExecutionEnums.SideEffectType.READ;
         }
         return ExecutionEnums.SideEffectType.NONE;
@@ -256,8 +215,8 @@ public class ExecutionPlanBuilderNode {
             return true;
         }
         int independentCount = 0;
-        for (List<String> deps : dependencies.values()) {
-            if (deps == null || deps.isEmpty()) {
+        for (List<String> dependency : dependencies.values()) {
+            if (dependency == null || dependency.isEmpty()) {
                 independentCount++;
             }
         }
@@ -321,9 +280,26 @@ public class ExecutionPlanBuilderNode {
         }
 
         if (order.size() != indegree.size()) {
-            log.warn("[planner] 检测到依赖环，回退为原始任务顺序");
+            log.warn("[执行计划构建] 检测到循环依赖，退回到原始任务顺序。");
             return new ArrayList<>(dependencies.keySet());
         }
         return order;
+    }
+
+    private List<Map<String, Object>> summarizeSteps(List<ExecutionStep> steps) {
+        List<Map<String, Object>> summary = new ArrayList<>();
+        if (steps == null || steps.isEmpty()) {
+            return summary;
+        }
+        for (ExecutionStep step : steps) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("stepId", step.getStepId());
+            item.put("type", step.getType());
+            item.put("tool", step.getTool());
+            item.put("dependsOn", step.getDependsOn());
+            item.put("input", step.getInput());
+            summary.add(item);
+        }
+        return summary;
     }
 }
