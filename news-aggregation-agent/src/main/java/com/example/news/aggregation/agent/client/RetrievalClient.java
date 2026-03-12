@@ -68,6 +68,7 @@ public class RetrievalClient {
                 .minScore(minScore)
                 .filters(filters)
                 .build();
+        long startNs = System.nanoTime();
         try {
             RetrievalResponse body;
             if (rpcEnabled) {
@@ -88,6 +89,7 @@ public class RetrievalClient {
             }
 
             if (body == null || body.getResults() == null) {
+                logRetrievalElapsed(path, query, topK, 0, startNs);
                 return new ArrayList<>();
             }
             List<RetrievalResult> results = new ArrayList<>();
@@ -104,11 +106,41 @@ public class RetrievalClient {
                         .metadata(item.getMetadata())
                         .build());
             }
+            logRetrievalElapsed(path, query, topK, results.size(), startNs);
             return results;
         } catch (Exception e) {
             log.warn("RetrievalClient request failed: path={}, error={}", path, e.getMessage());
+            logRetrievalElapsed(path, query, topK, 0, startNs);
             return new ArrayList<>();
         }
+    }
+
+    private void logRetrievalElapsed(String path, String query, int topK, int resultCount, long startNs) {
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000;
+        String elapsedSec = formatSeconds(elapsedMs);
+        if ("/api/news/retrieval/vector".equals(path)) {
+            int callNo = RetrievalMetricsContext.recordVector(elapsedMs);
+            log.info("向量检索耗时|callNo={} |path={} |topK={} |resultCount={} |query={} |elapsedSec={}",
+                    callNo, path, topK, resultCount, querySummary(query), elapsedSec);
+            return;
+        }
+        if ("/api/news/retrieval/keyword".equals(path)) {
+            int callNo = RetrievalMetricsContext.recordEs(elapsedMs);
+            log.info("es检索耗时|callNo={} |path={} |topK={} |resultCount={} |query={} |elapsedSec={}",
+                    callNo, path, topK, resultCount, querySummary(query), elapsedSec);
+            return;
+        }
+        if ("/api/news/retrieval/hybrid".equals(path)) {
+            int callNo = RetrievalMetricsContext.recordHybrid(elapsedMs);
+            log.info("es检索耗时|callNo={} |path={} |topK={} |resultCount={} |query={} |elapsedSec={} |mode=HYBRID",
+                    callNo, path, topK, resultCount, querySummary(query), elapsedSec);
+            log.info("向量检索耗时|callNo={} |path={} |topK={} |resultCount={} |query={} |elapsedSec={} |mode=HYBRID",
+                    callNo, path, topK, resultCount, querySummary(query), elapsedSec);
+        }
+    }
+
+    private String formatSeconds(long elapsedMs) {
+        return String.format("%.3f", elapsedMs / 1000.0);
     }
 
     private String summarizeFilters(Map<String, Object> filters) {

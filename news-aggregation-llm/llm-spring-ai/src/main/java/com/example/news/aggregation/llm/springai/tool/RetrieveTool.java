@@ -42,7 +42,10 @@ public class RetrieveTool {
     /**
      * 向量检索（语义检索）。
      */
-    @Tool(name = "retrieve_news", description = "向量检索新闻内容")
+    @Tool(
+            name = "retrieve_news",
+            description = "向量语义检索新闻内容（embedding 相似度）。适用：用户问题表述抽象、同义改写、概念性提问、长尾语义匹配。优势是语义召回强；在强时效/强实体精确过滤场景通常应与关键词检索搭配。"
+    )
     public List<RetrievalResult> retrieveNews(String query, int topK) {
         log.info("[工具][retrieve_news] 开始执行|query={} |topK={} |mockMode={}", query, topK, mockMode);
 
@@ -117,7 +120,10 @@ public class RetrieveTool {
     /**
      * 混合检索：Vector + Keyword，并通过 RRF 融合排序。
      */
-    @Tool(name = "hybrid_retrieve_news", description = "混合检索新闻内容")
+    @Tool(
+            name = "hybrid_retrieve_news",
+            description = "混合检索新闻内容（向量检索 + 关键词检索 + RRF 融合）。适用：新闻问答默认策略、复杂多实体问题、既要语义覆盖又要实体精确命中、对召回完整性要求高。通常优先于单一路径检索。"
+    )
     public List<RetrievalResult> hybridRetrieve(String query, int topK) {
         log.info("[工具][hybrid_retrieve_news] 开始执行|query={} |topK={}", query, topK);
 

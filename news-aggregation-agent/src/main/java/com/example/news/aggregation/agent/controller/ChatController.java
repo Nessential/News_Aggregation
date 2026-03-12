@@ -1,5 +1,7 @@
 package com.example.news.aggregation.agent.controller;
 
+import com.example.news.aggregation.agent.client.RetrievalMetricsContext;
+import com.example.news.aggregation.agent.client.LlmMetricsContext;
 import com.example.news.aggregation.agent.domain.AgentResponse;
 import com.example.news.aggregation.agent.domain.SessionState;
 import com.example.news.aggregation.agent.dto.ChatRequest;
@@ -34,6 +36,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -53,6 +56,11 @@ public class ChatController {
 
     @PostMapping("/chat")
     public ResponseEntity<AgentResponse> chat(@RequestBody ChatRequest request) {
+        long qaStartNs = System.nanoTime();
+        ensureTurnId(request);
+        String metricsTraceId = request.getTurnId();
+        RetrievalMetricsContext.startRequest(metricsTraceId);
+        LlmMetricsContext.startRequest(metricsTraceId);
         log.info("[api-chat] \u6536\u5230\u804a\u5929\u8bf7\u6c42|sessionId={} |turnId={} |query={}",
                 request.getSessionId(), request.getTurnId(), truncate(request.getQuery(), 120));
         try {
@@ -187,6 +195,37 @@ public class ChatController {
                     "Internal error: " + e.getMessage(),
                     "INTERNAL_ERROR"
             ));
+        } finally {
+            long elapsedMs = (System.nanoTime() - qaStartNs) / 1_000_000;
+            String elapsedSec = formatSeconds(elapsedMs);
+            String traceId = request.getTurnId();
+            RetrievalMetricsContext.Snapshot retrievalSnapshot = RetrievalMetricsContext.snapshot(traceId);
+            LlmMetricsContext.Snapshot llmSnapshot = LlmMetricsContext.snapshot(traceId);
+            log.info("问答总耗时|sessionId={} |turnId={} |elapsedSec={}",
+                    request.getSessionId(), request.getTurnId(), elapsedSec);
+            log.info("检索总时长|sessionId={} |turnId={} |elapsedSec={} |esCount={} |vectorCount={} |hybridCount={} |esTotalSec={} |vectorTotalSec={} |hybridTotalSec={}",
+                    request.getSessionId(),
+                    request.getTurnId(),
+                    formatSeconds(retrievalSnapshot.retrievalTotalMs()),
+                    retrievalSnapshot.esCount(),
+                    retrievalSnapshot.vectorCount(),
+                    retrievalSnapshot.hybridCount(),
+                    formatSeconds(retrievalSnapshot.esTotalMs()),
+                    formatSeconds(retrievalSnapshot.vectorTotalMs()),
+                    formatSeconds(retrievalSnapshot.hybridTotalMs()));
+            log.info("大模型总时长|sessionId={} |turnId={} |elapsedSec={} |callCount={} |intentCount={} |planCount={} |answerCount={} |intentTotalSec={} |planTotalSec={} |answerTotalSec={}",
+                    request.getSessionId(),
+                    request.getTurnId(),
+                    formatSeconds(llmSnapshot.totalMs()),
+                    llmSnapshot.callCount(),
+                    llmSnapshot.intentCount(),
+                    llmSnapshot.planCount(),
+                    llmSnapshot.answerCount(),
+                    formatSeconds(llmSnapshot.intentTotalMs()),
+                    formatSeconds(llmSnapshot.planTotalMs()),
+                    formatSeconds(llmSnapshot.answerTotalMs()));
+            RetrievalMetricsContext.clear(traceId);
+            LlmMetricsContext.clear(traceId);
         }
     }
 
@@ -395,5 +434,16 @@ public class ChatController {
             return false;
         }
         return "FEATURE_QUOTA_EXCEEDED".equalsIgnoreCase(consumeResult.getReasonCode());
+    }
+
+    private String formatSeconds(long elapsedMs) {
+        return String.format("%.3f", elapsedMs / 1000.0);
+    }
+
+    private void ensureTurnId(ChatRequest request) {
+        if (request.getTurnId() != null && !request.getTurnId().isBlank()) {
+            return;
+        }
+        request.setTurnId(UUID.randomUUID().toString().replace("-", ""));
     }
 }

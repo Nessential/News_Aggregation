@@ -37,7 +37,10 @@ public class SearchTool {
     /**
      * 执行关键词检索。
      */
-    @Tool(name = "search_news", description = "关键词检索新闻内容")
+    @Tool(
+            name = "search_news",
+            description = "关键词检索新闻内容（ES 倒排检索）。适用：精确词命中场景，如人名/机构名/产品名/地点、明确事件词、明确时间窗口过滤、需要可解释关键词命中。优势是精确召回强；对语义改写、同义表达、跨表述召回弱于向量与混合检索。"
+    )
     public List<RetrievalResult> searchByKeyword(String query, int topK) {
         log.info("[工具][search_news] 开始执行|query={} |topK={} |mockMode={}", query, topK, mockMode);
 
