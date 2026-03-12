@@ -3,9 +3,9 @@ news:
   aggregation:
     # MySQL配置
     mysql:
-      url: jdbc:mysql://127.0.0.1:3306/news-aggregation
-      username: root
-      password: wangchuan
+      url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/news-aggregation}
+      username: ${MYSQL_USERNAME:root}
+      password: ${MYSQL_PASSWORD:}
     # Redis配置
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -14,18 +14,18 @@ news:
       password: ${REDIS_PASSWORD:}
     # XXL-Job配置
     xxl-job:
-      admin-addresses: http://127.0.0.1:8090/xxl-job-admin
-      access-token: default_token
-      executor-appname: news-aggregation-executor
-      executor-port: 9999
-      executor-ip: 127.0.0.1
-      admin-timeout: 3
+      admin-addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:8090/xxl-job-admin}
+      access-token: ${XXL_JOB_ACCESS_TOKEN:}
+      executor-appname: ${XXL_JOB_EXECUTOR_APPNAME:news-aggregation-executor}
+      executor-port: ${XXL_JOB_EXECUTOR_PORT:9999}
+      executor-ip: ${XXL_JOB_EXECUTOR_IP:127.0.0.1}
+      admin-timeout: ${XXL_JOB_ADMIN_TIMEOUT:3}
     # MinIO配置
     minio:
-      endpoint: http://127.0.0.1:9000
-      access-key: admin
-      secret-key: Minio@123456
-      bucket: news-image
+      endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+      access-key: ${MINIO_ACCESS_KEY:admin}
+      secret-key: ${MINIO_SECRET_KEY:}
+      bucket: ${MINIO_BUCKET:news-image}
     # 百度翻译配置
     translate:
       baidu:
@@ -35,39 +35,39 @@ news:
     embedding:
       zhipu:
         api-key: ${ZHIPU_API_KEY}
-        base-url: https://open.bigmodel.cn/api/paas/v4
-        model: embedding-3
-        dimensions: 2048
-        connect-timeout: 10000
-        read-timeout: 30000
+        base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+        model: ${ZHIPU_EMBEDDING_MODEL:embedding-3}
+        dimensions: ${ZHIPU_EMBEDDING_DIMENSIONS:2048}
+        connect-timeout: ${ZHIPU_CONNECT_TIMEOUT:10000}
+        read-timeout: ${ZHIPU_READ_TIMEOUT:30000}
         chunk-size: 500
         chunk-overlap: 50
         min-chunk-size: 100
     # Qdrant向量数据库配置
     qdrant:
-      host: localhost
-      port: 6334
-      use-tls: false
+      host: ${QDRANT_HOST:localhost}
+      port: ${QDRANT_PORT:6334}
+      use-tls: ${QDRANT_USE_TLS:false}
       # 默认集合（向后兼容）
-      collection-name: news_chunks_zh
-      vector-size: 2048
+      collection-name: ${QDRANT_COLLECTION_NAME:news_chunks_zh}
+      vector-size: ${QDRANT_VECTOR_SIZE:2048}
       api-key: ${QDRANT_API_KEY:}
       # 多集合配置
       collections:
         # 英文 Chunk 向量（用于 RAG 检索）
-        chunks-en: news_chunks_en
+        chunks-en: ${QDRANT_COLLECTION_CHUNKS_EN:news_chunks_en}
         # 中文 Chunk 向量
-        chunks-zh: news_chunks_zh
+        chunks-zh: ${QDRANT_COLLECTION_CHUNKS_ZH:news_chunks_zh}
         # Topic 向量（用于 Story 归簾）
-        topic-en: news_topic_en
-        topic-zh: news_topic_zh
+        topic-en: ${QDRANT_COLLECTION_TOPIC_EN:news_topic_en}
+        topic-zh: ${QDRANT_COLLECTION_TOPIC_ZH:news_topic_zh}
     # Elasticsearch配置
     elasticsearch:
-      host: localhost
-      port: 9200
-      username: ''
-      password: ''
-      index-name: news
+      host: ${ES_HOST:localhost}
+      port: ${ES_PORT:9200}
+      username: ${ES_USERNAME:}
+      password: ${ES_PASSWORD:}
+      index-name: ${ES_INDEX:news}
     # LLM统一配置
     llm:
       # 全局默认Provider
@@ -98,15 +98,15 @@ news:
       zhipu:
         enabled: true
         api-key: ${ZHIPU_API_KEY}
-        base-url: https://open.bigmodel.cn/api/paas/v4
+        base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
         models:
-          chat: glm-4
-          chat-lite: glm-4-flash
-          embedding: embedding-3
-        temperature: 0.7
-        max-tokens: 2048
-        connect-timeout: 10000
-        read-timeout: 60000
+          chat: ${ZHIPU_CHAT_MODEL:glm-4}
+          chat-lite: ${ZHIPU_CHAT_LITE_MODEL:glm-4-flash}
+          embedding: ${ZHIPU_EMBEDDING_MODEL:embedding-3}
+        temperature: ${ZHIPU_CHAT_TEMPERATURE:0.7}
+        max-tokens: ${ZHIPU_CHAT_MAX_TOKENS:2048}
+        connect-timeout: ${ZHIPU_CONNECT_TIMEOUT:10000}
+        read-timeout: ${ZHIPU_LLM_READ_TIMEOUT:60000}
         cost:
           chat-input: 0.0001
           chat-output: 0.0001
