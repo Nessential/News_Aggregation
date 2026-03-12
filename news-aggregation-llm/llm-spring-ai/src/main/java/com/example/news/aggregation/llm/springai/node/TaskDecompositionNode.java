@@ -1,147 +1,258 @@
 package com.example.news.aggregation.llm.springai.node;
 
+import com.example.news.aggregation.llm.springai.planner.PlannerToolSchemaProvider;
+import com.example.news.aggregation.llm.springai.prompt.PromptRegistry;
 import com.example.news.aggregation.llm.springai.state.PlannerState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 /**
  * 任务分解节点。
- * 调用 LLM（Structured Output）将用户查询动态分解为子任务列表。
- * LLM 调用失败或输出不合法时，降级到规则模板保证系统可用。
+ * <p>
+ * 当前主链路通过 Spring AI 的工具声明能力，将检索与重排工具的结构化定义注入给模型，
+ * 让模型基于正式工具 schema 生成任务计划。
+ * 如果模型规划失败，仍然会回退到规则模板，保证系统可用性。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class TaskDecompositionNode {
 
-    private static final String TOOL_DESCRIPTIONS =
-            "- search_news：ES 关键词检索。适合精确匹配：人名/机构名/产品名/地点、明确事件词、明确时间范围过滤；优势是精确命中和可解释性。\n" +
-            "- retrieve_news：向量语义检索。适合抽象问法、同义改写、概念描述、跨表述匹配；优势是语义召回，弱项是精确词过滤。\n" +
-            "- hybrid_retrieve_news：混合检索（向量+关键词+RRF融合）。适合新闻问答默认检索、复杂多实体问题、既要语义覆盖又要精确命中的场景，通常优先级高于单一路径。\n" +
-            "- rerank_results：MMR 重排。对检索结果去重和提升多样性，必须在检索步骤之后使用。\n" +
-            "- llm_generate：基于已有证据生成最终答案，必须是最后一步且依赖前序检索结果。";
-
-    private static final String PLANNING_CONSTRAINTS =
-            "1. llm_generate 必须是最后一步，且必须依赖至少一个检索步骤。\n" +
-            "2. rerank_results 只能在检索步骤之后使用。\n" +
-            "3. 无依赖关系的步骤可以设置 parallelizable=true 以并行执行。\n" +
-            "4. 步骤数量控制在 2~6 步，不要过度拆分。\n" +
-            "5. requiredTools 中的工具名必须来自上方可用工具列表。\n" +
-            "6. 如果查询涉及多个实体（如\"中国和美国\"），必须为每个实体生成独立的检索任务，然后合并结果。\n" +
-            "7. 多实体查询的检索策略：每个实体单独检索 -> 合并去重 -> 生成答案。\n" +
-            "8. 新闻问答默认优先使用 hybrid_retrieve_news；若问题包含精确实体或时间过滤，可补充 search_news 并在后续合并。\n" +
-            "9. 当查询语义模糊、概念化、同义改写明显时，不要只用 search_news，至少包含一次 retrieve_news 或 hybrid_retrieve_news。\n" +
-            "10. 当查询同时包含“精确实体约束 + 语义背景问题”时，优先规划为“search_news + hybrid_retrieve_news”双检索路径。";
-
-    private final ChatClient chatClient;
+    private final ChatClient.Builder chatClientBuilder;
+    private final PromptRegistry promptRegistry;
+    private final PlannerToolSchemaProvider plannerToolSchemaProvider;
 
     public PlannerState execute(PlannerState state) {
         state.incrementStep();
 
         try {
-            String prompt = buildPrompt(state);
-            log.info("[task-decompose] 调用 LLM 分解任务|isReplan={}|query={}",
-                    state.isReplan(), truncate(state.getQuery(), 100));
+            String systemPrompt = promptRegistry.getPrompt("planner-tool", "");
+            String userPrompt = buildUserPrompt(state);
+            List<String> registeredToolNames = resolveRegisteredToolNames();
+            log.info("[任务规划] 本次已向大模型注册工具声明。toolCount={}，tools={}",
+                    registeredToolNames.size(), registeredToolNames);
+            log.info("[任务规划] 开始执行基于工具声明的任务规划。query={}", truncate(state.getQuery(), 120));
 
-            DecompositionResult result = chatClient.prompt()
-                    .user(prompt)
+            DecompositionResult result = chatClientBuilder.build()
+                    .prompt()
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .tools(plannerToolSchemaProvider)
                     .call()
                     .entity(DecompositionResult.class);
 
             if (result == null || result.getTasks() == null || result.getTasks().isEmpty()) {
-                log.warn("[task-decompose] LLM 输出为空，降级到规则模板|query={}", truncate(state.getQuery(), 100));
+                log.warn("[任务规划] 模型未返回有效任务，使用规则模板兜底。query={}", truncate(state.getQuery(), 120));
                 return fallbackToRuleTemplate(state);
             }
 
-            List<PlannerState.SubTask> subTasks = result.toSubTasks();
+            log.info("[任务规划] 模型原始任务计划={}", result);
+
+            List<PlannerState.SubTask> subTasks = normalizeSubTasks(result.toSubTasks(), state);
+            subTasks = ensureAnswerGenerationStep(subTasks, state);
             if (subTasks.isEmpty()) {
-                log.warn("[task-decompose] LLM 输出转换后为空列表，降级到规则模板");
+                log.warn("[任务规划] 模型返回的任务列表为空，使用规则模板兜底。query={}", truncate(state.getQuery(), 120));
                 return fallbackToRuleTemplate(state);
             }
 
-            log.info("[task-decompose] LLM 分解成功|stepCount={}|isReplan={}", subTasks.size(), state.isReplan());
+            log.info("[任务规划] 任务规划成功，生成子任务数量={}，query={}",
+                    subTasks.size(), truncate(state.getQuery(), 120));
+            log.info("[任务规划] 规范化后的子任务列表={}", subTasks);
             state.setSubTasks(subTasks);
             return state;
-
-        } catch (Exception e) {
-            log.error("[task-decompose] LLM 调用异常，降级到规则模板|error={}", e.getMessage(), e);
+        } catch (Exception ex) {
+            log.error("[任务规划] 任务规划失败，使用规则模板兜底。query={}, error={}",
+                    truncate(state.getQuery(), 120), ex.getMessage(), ex);
             return fallbackToRuleTemplate(state);
         }
     }
 
-    // ── Prompt 构建 ──────────────────────────────────────────────────────────
+    private String buildUserPrompt(PlannerState state) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("用户问题：").append(nullToEmpty(state.getQuery())).append('\n');
+        builder.append("任务类型：").append(resolveTaskFamily(state)).append('\n');
 
-    private String buildPrompt(PlannerState state) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("你是一个新闻检索规划器。请将以下查询分解为可执行的子任务列表。\n\n");
-        sb.append("【查询】").append(state.getQuery()).append("\n");
-        sb.append("【任务类型】").append(resolveTaskFamily(state)).append("\n");
-
-        // 传递实体信息
         List<String> entities = extractEntities(state);
-        if (entities != null && !entities.isEmpty()) {
-            sb.append("【提取的实体】").append(String.join("、", entities)).append("\n");
-            sb.append("【重要】该查询涉及多个实体，请为每个实体生成独立的检索任务！\n");
+        if (!entities.isEmpty()) {
+            builder.append("识别出的实体：").append(String.join("、", entities)).append('\n');
+            builder.append("请为每个实体单独规划检索步骤，并在最终步骤汇总生成答案。").append('\n');
         }
-        sb.append("\n");
 
-        sb.append("【可用工具及能力说明】\n").append(TOOL_DESCRIPTIONS).append("\n\n");
-        sb.append("【规划约束】\n").append(PLANNING_CONSTRAINTS).append("\n");
+        Map<String, Object> filters = buildFilters(state);
+        if (!filters.isEmpty()) {
+            builder.append("可用过滤条件：").append(filters).append('\n');
+        }
 
         if (state.isReplan()) {
-            sb.append("\n【上次执行失败，请据此修正计划】\n");
-            sb.append("失败原因：").append(state.getReplanReason()).append("\n");
-            sb.append("已完成步骤执行情况：\n");
-            appendStepResults(sb, state.getStepResults());
-            sb.append("请根据失败原因调整计划，避免重复使用导致失败的工具或路径。\n");
+            builder.append("这是一次重新规划。").append('\n');
+            builder.append("重新规划原因：").append(nullToEmpty(state.getReplanReason())).append('\n');
+            builder.append("已完成步骤摘要：").append('\n');
+            appendStepResults(builder, state.getStepResults());
         }
 
-        sb.append("\n【输出格式】\n");
-        sb.append("输出合法 JSON，结构为：\n");
-        sb.append("{\n");
-        sb.append("  \"tasks\": [\n");
-        sb.append("    {\n");
-        sb.append("      \"id\": \"task-1\",\n");
-        sb.append("      \"type\": \"SEARCH\",\n");
-        sb.append("      \"description\": \"...\",\n");
-        sb.append("      \"dependencies\": [],\n");
-        sb.append("      \"requiredTools\": [\"search_news\"],\n");
-        sb.append("      \"parameters\": { \"query\": \"...\", \"filters\": {} },\n");
-        sb.append("      \"parallelizable\": true\n");
-        sb.append("    }\n");
-        sb.append("  ]\n");
-        sb.append("}\n");
-        sb.append("只输出 JSON，不要有任何其他文字。");
-
-        return sb.toString();
+        builder.append("请严格输出任务计划 JSON。");
+        return builder.toString();
     }
 
-    private void appendStepResults(StringBuilder sb, Map<String, PlannerState.StepExecutionResult> stepResults) {
+    private void appendStepResults(StringBuilder builder, Map<String, PlannerState.StepExecutionResult> stepResults) {
         if (stepResults == null || stepResults.isEmpty()) {
-            sb.append("  （无已完成步骤记录）\n");
+            builder.append("无已完成步骤。").append('\n');
             return;
         }
         stepResults.forEach((stepId, result) -> {
-            sb.append("  - ").append(stepId).append(": ")
-              .append(result.getStatus());
+            builder.append("- 步骤ID=").append(stepId)
+                    .append("，状态=").append(result.getStatus());
             if (result.getToolUsed() != null) {
-                sb.append(", 工具=").append(result.getToolUsed());
+                builder.append("，工具=").append(result.getToolUsed());
             }
             if (result.getEvidenceCount() > 0) {
-                sb.append(", 证据数=").append(result.getEvidenceCount());
+                builder.append("，证据数量=").append(result.getEvidenceCount());
             }
-            if ("FAILED".equals(result.getStatus()) && result.getFailureReason() != null) {
-                sb.append(", 失败原因=").append(result.getFailureReason());
+            if (result.getFailureReason() != null && !result.getFailureReason().isBlank()) {
+                builder.append("，失败原因=").append(result.getFailureReason());
             }
-            sb.append("\n");
+            builder.append('\n');
         });
+    }
+
+    private List<PlannerState.SubTask> ensureAnswerGenerationStep(List<PlannerState.SubTask> input, PlannerState state) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+
+        List<PlannerState.SubTask> subTasks = new ArrayList<>(input);
+        boolean hasGenerateStep = subTasks.stream().anyMatch(this::isAnswerGenerationStep);
+        if (hasGenerateStep) {
+            return subTasks;
+        }
+
+        List<String> dependencyIds = subTasks.stream()
+                .map(PlannerState.SubTask::getId)
+                .filter(id -> id != null && !id.isBlank())
+                .toList();
+
+        PlannerState.SubTask generateStep = PlannerState.SubTask.builder()
+                .id("task-" + (subTasks.size() + 1))
+                .type(resolveGenerateType(state))
+                .description("基于前置检索结果生成最终答案")
+                .dependencies(dependencyIds)
+                .requiredTools(List.of("llm_generate"))
+                .parameters(Map.of("taskFamily", resolveTaskFamily(state)))
+                .build();
+
+        subTasks.add(generateStep);
+        log.info("[任务规划] 模型未显式生成答案步骤，系统已自动补齐。stepId={}", generateStep.getId());
+        return subTasks;
+    }
+
+    /**
+     * 对模型生成的子任务做轻量规范化。
+     * 当前主要处理时间范围参数，避免 recent 这类模糊值直接进入执行层。
+     */
+    private List<PlannerState.SubTask> normalizeSubTasks(List<PlannerState.SubTask> input, PlannerState state) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        List<PlannerState.SubTask> normalized = new ArrayList<>();
+        for (PlannerState.SubTask task : input) {
+            if (task == null) {
+                continue;
+            }
+            Map<String, Object> parameters = normalizeParameters(task.getParameters(), state);
+            task.setParameters(parameters);
+            normalized.add(task);
+        }
+        return normalized;
+    }
+
+    private Map<String, Object> normalizeParameters(Map<String, Object> parameters, PlannerState state) {
+        if (parameters == null || parameters.isEmpty()) {
+            return parameters;
+        }
+        Map<String, Object> normalized = new HashMap<>(parameters);
+        Object filtersObject = normalized.get("filters");
+        if (filtersObject instanceof Map<?, ?> rawFilters) {
+            Map<String, Object> filters = new HashMap<>();
+            rawFilters.forEach((key, value) -> {
+                if (key != null) {
+                    filters.put(String.valueOf(key), value);
+                }
+            });
+            normalizeTimeRange(filters, state);
+            normalized.put("filters", filters);
+        }
+        return normalized;
+    }
+
+    private void normalizeTimeRange(Map<String, Object> filters, PlannerState state) {
+        if (filters == null || filters.isEmpty()) {
+            return;
+        }
+        Object timeRange = filters.get("timeRange");
+        if (timeRange == null) {
+            return;
+        }
+        String raw = String.valueOf(timeRange).trim();
+        if (raw.isBlank()) {
+            return;
+        }
+        String normalized = mapRelativeTimeRange(raw);
+        if (!raw.equals(normalized)) {
+            filters.put("timeRange", normalized);
+            log.info("[任务规划] 已将模糊时间范围规范化。原值={}，规范值={}，query={}",
+                    raw, normalized, truncate(state.getQuery(), 120));
+        }
+    }
+
+    /**
+     * 相对时间范围的终点统一理解为当前时间。
+     * 这里输出标准窗口值，供执行层按“当前时间向前倒推”解释。
+     */
+    private String mapRelativeTimeRange(String raw) {
+        String normalized = raw.toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "recent", "latest", "recently", "近期", "最近", "最新", "最近几天" -> "7d";
+            case "近一周", "最近一周", "7天", "7d" -> "7d";
+            case "近两周", "最近两周", "14天", "14d" -> "14d";
+            case "近一个月", "最近一个月", "近30天", "30天", "30d", "本月" -> "30d";
+            case "近三个月", "最近三个月", "90天", "90d" -> "90d";
+            default -> raw;
+        };
+    }
+
+    private boolean isAnswerGenerationStep(PlannerState.SubTask task) {
+        if (task == null) {
+            return false;
+        }
+        if (task.getRequiredTools() != null && task.getRequiredTools().contains("llm_generate")) {
+            return true;
+        }
+        String type = task.getType();
+        return "QA".equalsIgnoreCase(type)
+                || "ANALYZE".equalsIgnoreCase(type)
+                || "SUMMARY".equalsIgnoreCase(type)
+                || "COMPARE".equalsIgnoreCase(type)
+                || "TIMELINE".equalsIgnoreCase(type)
+                || "DEEP_DIVE".equalsIgnoreCase(type);
+    }
+
+    private String resolveGenerateType(PlannerState state) {
+        String taskFamily = resolveTaskFamily(state);
+        if (taskFamily == null || taskFamily.isBlank()) {
+            return "ANALYZE";
+        }
+        return taskFamily;
     }
 
     private String resolveTaskFamily(PlannerState state) {
@@ -151,20 +262,21 @@ public class TaskDecompositionNode {
         return "QA";
     }
 
-    /**
-     * 从 RouterResult 中提取实体列表
-     */
     private List<String> extractEntities(PlannerState state) {
-        if (state.getRouterResult() != null && state.getRouterResult().getEntities() != null) {
-            return state.getRouterResult().getEntities();
+        if (state.getRouterResult() == null || state.getRouterResult().getEntities() == null) {
+            return List.of();
         }
-        return null;
+        LinkedHashSet<String> entities = new LinkedHashSet<>();
+        for (String entity : state.getRouterResult().getEntities()) {
+            if (entity != null && !entity.isBlank()) {
+                entities.add(entity.trim());
+            }
+        }
+        return new ArrayList<>(entities);
     }
 
-    // ── 降级规则模板 ─────────────────────────────────────────────────────────
-
     /**
-     * LLM 调用失败时的保底降级逻辑（保留原规则树作为备用）。
+     * 当模型规划失败时，使用规则模板生成最小可执行计划。
      */
     private PlannerState fallbackToRuleTemplate(PlannerState state) {
         String query = state.getQuery();
@@ -177,40 +289,44 @@ public class TaskDecompositionNode {
             subTasks.add(PlannerState.SubTask.builder()
                     .id("task-1")
                     .type("SEARCH")
-                    .description("关键词检索相关资料")
+                    .description("检索相关新闻")
+                    .requiredTools(List.of("search_news"))
                     .parameters(buildParams(query, filters))
                     .build());
             subTasks.add(PlannerState.SubTask.builder()
                     .id("task-2")
                     .type("RETRIEVE")
-                    .description("向量检索补充证据")
-                    .parameters(buildParams(query, filters))
+                    .description("补充语义检索证据")
+                    .requiredTools(List.of("hybrid_retrieve_news"))
+                    .parameters(buildHybridParams(query, filters))
                     .build());
             subTasks.add(PlannerState.SubTask.builder()
                     .id("task-3")
-                    .type("COMPARE".equals(taskFamily) ? "COMPARE"
-                            : "TIMELINE".equals(taskFamily) ? "TIMELINE" : "ANALYZE")
-                    .description("基于证据进行综合分析")
+                    .type(resolveGenerateType(state))
+                    .description("基于证据生成最终答案")
                     .dependencies(List.of("task-1", "task-2"))
+                    .requiredTools(List.of("llm_generate"))
                     .parameters(buildGenerateParams(taskFamily))
                     .build());
         } else {
             subTasks.add(PlannerState.SubTask.builder()
                     .id("task-1")
-                    .type("SEARCH")
-                    .description("检索相关资料")
-                    .parameters(buildParams(query, filters))
+                    .type("RETRIEVE")
+                    .description("混合检索相关新闻")
+                    .requiredTools(List.of("hybrid_retrieve_news"))
+                    .parameters(buildHybridParams(query, filters))
                     .build());
             subTasks.add(PlannerState.SubTask.builder()
                     .id("task-2")
-                    .type("ANALYZE")
-                    .description("基于证据生成答案")
+                    .type(resolveGenerateType(state))
+                    .description("基于证据生成最终答案")
                     .dependencies(List.of("task-1"))
+                    .requiredTools(List.of("llm_generate"))
                     .parameters(buildGenerateParams(taskFamily))
                     .build());
         }
 
-        log.info("[task-decompose] 规则模板降级完成|taskFamily={}|stepCount={}", taskFamily, subTasks.size());
+        log.info("[任务规划] 规则模板兜底完成，生成子任务数量={}。", subTasks.size());
         state.setSubTasks(subTasks);
         return state;
     }
@@ -221,6 +337,12 @@ public class TaskDecompositionNode {
         if (filters != null && !filters.isEmpty()) {
             params.put("filters", filters);
         }
+        return params;
+    }
+
+    private Map<String, Object> buildHybridParams(String query, Map<String, Object> filters) {
+        Map<String, Object> params = buildParams(query, filters);
+        params.put("mode", "HYBRID");
         return params;
     }
 
@@ -272,8 +394,31 @@ public class TaskDecompositionNode {
         }
     }
 
-    private static String truncate(String value, int maxLength) {
-        if (value == null || maxLength <= 0) return "";
+    private String truncate(String value, int maxLength) {
+        if (value == null || maxLength <= 0) {
+            return "";
+        }
         return value.length() <= maxLength ? value : value.substring(0, maxLength) + "...";
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private List<String> resolveRegisteredToolNames() {
+        List<String> toolNames = new ArrayList<>();
+        Method[] methods = plannerToolSchemaProvider.getClass().getMethods();
+        for (Method method : methods) {
+            Tool tool = method.getAnnotation(Tool.class);
+            if (tool == null) {
+                continue;
+            }
+            String toolName = tool.name();
+            if (toolName == null || toolName.isBlank()) {
+                toolName = method.getName();
+            }
+            toolNames.add(toolName);
+        }
+        return toolNames;
     }
 }

@@ -9,19 +9,23 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * LLM Structured Output 反序列化目标：任务分解结果。
- * TaskDecompositionNode 调用 ChatClient 后将响应解析为此类，再转换为 PlannerState.SubTask 列表。
+ * 任务分解结果。
+ * <p>
+ * 模型在规划阶段输出的 JSON 会先反序列化为该对象，
+ * 再转换为系统内部使用的 {@link PlannerState.SubTask} 列表。
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class DecompositionResult {
 
-    /** LLM 输出的子任务列表 */
+    /**
+     * 模型输出的子任务列表。
+     */
     private List<SubTaskDto> tasks;
 
     /**
-     * 转换为 PlannerState.SubTask 列表，供后续 Graph 节点使用。
+     * 将模型输出的任务列表转换为内部子任务对象。
      */
     public List<PlannerState.SubTask> toSubTasks() {
         if (tasks == null || tasks.isEmpty()) {
@@ -41,32 +45,46 @@ public class DecompositionResult {
     }
 
     /**
-     * LLM 输出的单个子任务 DTO。
+     * 单个子任务的数据结构。
      */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SubTaskDto {
 
-        /** 任务 ID，如 task-1, task-2（LLM 自行分配） */
+        /**
+         * 任务 ID，例如 task-1。
+         */
         private String id;
 
-        /** 任务类型：SEARCH / RETRIEVE / ANALYZE / COMPARE / TIMELINE 等 */
+        /**
+         * 任务类型，例如 SEARCH、RETRIEVE、RERANK、ANALYZE。
+         */
         private String type;
 
-        /** 任务自然语言描述 */
+        /**
+         * 任务描述。
+         */
         private String description;
 
-        /** 依赖的任务 ID 列表（空或 null 表示无依赖，可并行） */
+        /**
+         * 依赖任务 ID 列表。
+         */
         private List<String> dependencies;
 
-        /** 本步骤使用的工具名列表（来自可用工具集） */
+        /**
+         * 当前步骤要使用的工具列表。
+         */
         private List<String> requiredTools;
 
-        /** 工具调用参数（如 query、filters、topK 等） */
+        /**
+         * 工具调用参数。
+         */
         private Map<String, Object> parameters;
 
-        /** 是否可与其他无依赖关系的步骤并行执行 */
+        /**
+         * 当前步骤是否允许并行执行。
+         */
         private boolean parallelizable;
     }
 }

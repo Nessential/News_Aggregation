@@ -17,7 +17,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Planner 服务：封装 PlannerGraph 调用、计划校验与元数据回填。
+ * 规划服务。
+ * <p>
+ * 服务统一调用 PlannerGraph 生成执行计划，并补齐规划链路元数据。
+ * 当前只保留基于工具声明的规划主链路，不再保留旧的手写工具说明规划模式。
  */
 @Slf4j
 @Service
@@ -34,12 +37,10 @@ public class PlannerService {
     @Value("${app.llm.planner.semantic-version:1.0.0}")
     private String plannerSemanticVersion;
 
-    /**
-     * 生成执行计划。
-     */
     public ExecutionPlan plan(PlanRequest request) {
         try {
             if (!graphProperties.isPlannerEnabled()) {
+                log.warn("[规划服务] 规划图未启用，返回空计划。");
                 return emptyExecutionPlan(request);
             }
 
@@ -49,23 +50,31 @@ public class PlannerService {
                     .context(request.getContext())
                     .semanticVersion(request.getSemanticVersion() != null
                             ? request.getSemanticVersion() : plannerSemanticVersion)
-                    // Replan 上下文：由 ExecutionRecoveryService 填充，首次规划时均为 null/false
                     .isReplan(Boolean.TRUE.equals(request.getIsReplan()))
                     .replanReason(request.getReplanReason())
                     .stepResults(request.getStepResults())
                     .build();
 
+            log.info("[规划服务] 开始生成执行计划。query={}，isReplan={}",
+                    truncate(request.getQuery(), 120), Boolean.TRUE.equals(request.getIsReplan()));
+
             PlannerState finalState = plannerGraph.invoke(state);
             ExecutionPlan plan = finalState.getExecutionPlan();
 
             if (!validator.validateExecutionPlan(plan)) {
-                log.warn("[规划服务] 计划结构校验失败，返回空计划兜底。");
+                log.warn("[规划服务] 执行计划结构校验失败，返回空计划。query={}", truncate(request.getQuery(), 120));
                 return emptyExecutionPlan(request);
             }
 
-            return enrichPlanMetadata(plan, request);
+            ExecutionPlan enrichedPlan = enrichPlanMetadata(plan, request);
+            log.info("[规划服务] 执行计划生成完成。planId={}，stepCount={}",
+                    enrichedPlan.getPlanId(),
+                    enrichedPlan.getSteps() == null ? 0 : enrichedPlan.getSteps().size());
+            return enrichedPlan;
         } catch (Exception e) {
-            log.error("[规划服务] 计划生成异常，返回空计划兜底。", e);
+            log.error("[规划服务] 执行计划生成失败，返回空计划。query={}，error={}",
+                    request == null ? "" : truncate(request.getQuery(), 120),
+                    e.getMessage(), e);
             return emptyExecutionPlan(request);
         }
     }
@@ -75,7 +84,8 @@ public class PlannerService {
         metadata.put("taskCount", 0);
         metadata.put("plannerTraceId", resolvePlannerTraceId(request));
         metadata.put("plannerMode", resolvePlannerMode(request));
-        metadata.put("toolBindingMode", resolveToolBindingMode(request));
+        metadata.put("toolBindingMode", "spring_tool");
+        metadata.put("planningChannel", "spring_ai_tool");
 
         return ExecutionPlan.builder()
                 .planId("plan-empty")
@@ -90,9 +100,6 @@ public class PlannerService {
                 .build();
     }
 
-    /**
-     * 统一回填 planner 元数据，保证 trace、模式、工具绑定信息不丢失。
-     */
     private ExecutionPlan enrichPlanMetadata(ExecutionPlan plan, PlanRequest request) {
         if (plan == null) {
             return emptyExecutionPlan(request);
@@ -105,19 +112,18 @@ public class PlannerService {
 
         String plannerTraceId = resolvePlannerTraceId(request);
         String plannerMode = resolvePlannerMode(request);
-        String toolBindingMode = resolveToolBindingMode(request);
         metadata.put("plannerTraceId", plannerTraceId);
         metadata.put("plannerMode", plannerMode);
-        metadata.put("toolBindingMode", toolBindingMode);
+        metadata.put("toolBindingMode", "spring_tool");
+        metadata.put("planningChannel", "spring_ai_tool");
         metadata.putIfAbsent("taskCount", plan.getSteps() == null ? 0 : plan.getSteps().size());
 
         plan.setMetadata(metadata);
 
-        log.info("[规划服务] 计划元数据补齐完成|planId={} |plannerTraceId={} |plannerMode={} |toolBindingMode={} |stepCount= {}",
+        log.info("[规划服务] 已补齐计划元数据。planId={}，plannerTraceId={}，plannerMode={}，stepCount={}",
                 plan.getPlanId(),
                 plannerTraceId,
                 plannerMode,
-                toolBindingMode,
                 plan.getSteps() == null ? 0 : plan.getSteps().size());
         return plan;
     }
@@ -148,16 +154,10 @@ public class PlannerService {
         return "HYBRID";
     }
 
-    private String resolveToolBindingMode(PlanRequest request) {
-        if (request != null && request.getContext() != null) {
-            Object mode = request.getContext().get("toolBindingMode");
-            if (mode != null) {
-                String candidate = String.valueOf(mode).trim().toLowerCase();
-                if (!candidate.isBlank()) {
-                    return candidate;
-                }
-            }
+    private String truncate(String value, int maxLength) {
+        if (value == null || maxLength <= 0) {
+            return "";
         }
-        return "legacy";
+        return value.length() <= maxLength ? value : value.substring(0, maxLength) + "...";
     }
 }
