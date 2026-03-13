@@ -23,7 +23,7 @@ public class RouterClient {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    @DubboReference(check = false, timeout = 12000, retries = 0)
+    @DubboReference(check = false, timeout = 15000, retries = 0)
     private LlmRouterRpcService llmRouterRpcService;
 
     @Value("${app.llm.router.base-url:http://localhost:8081}")

@@ -126,6 +126,6 @@ app:
     features:
       chat:
         enabled: ${APP_FEATURE_QUOTA_CHAT_ENABLED:true}
-        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:1}
+        daily-limit: ${APP_FEATURE_QUOTA_CHAT_DAILY_LIMIT:10}
   token:
     expire-hours: ${APP_TOKEN_EXPIRE_HOURS:24}

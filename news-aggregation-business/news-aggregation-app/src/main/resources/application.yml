@@ -25,6 +25,11 @@ app:
   cors:
     enabled: ${APP_CORS_ENABLED:false}
 
+news:
+  aggregation:
+    xxl-job:
+      enable: true
+
 # MyBatis
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

@@ -22,4 +22,5 @@ public class NewsArticleDto implements Serializable {
     private String content;
     private String source;
     private String publishedAt;
+    private String imageUrl;
 }

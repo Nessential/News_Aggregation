@@ -19,8 +19,7 @@ public final class MarkdownResponseFormatter {
         }
 
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < answerItems.size(); i++) {
-            AgentResponse.AnswerItemView item = answerItems.get(i);
+        for (AgentResponse.AnswerItemView item : answerItems) {
             if (item == null || isBlank(item.getText())) {
                 continue;
             }
@@ -28,9 +27,7 @@ public final class MarkdownResponseFormatter {
             if (sb.length() > 0) {
                 sb.append("\n\n");
             }
-            sb.append("### 回答 ").append(i + 1).append("\n\n");
             sb.append(item.getText().trim());
-
             appendRelatedNews(sb, item.getRelatedNews());
         }
         if (sb.length() == 0) {
@@ -50,7 +47,7 @@ public final class MarkdownResponseFormatter {
         if (relatedNews == null || relatedNews.isEmpty()) {
             return;
         }
-        sb.append("\n\n").append("#### 相关新闻").append("\n");
+        sb.append("\n\n#### 相关新闻\n");
         for (Candidate news : relatedNews) {
             if (news == null) {
                 continue;

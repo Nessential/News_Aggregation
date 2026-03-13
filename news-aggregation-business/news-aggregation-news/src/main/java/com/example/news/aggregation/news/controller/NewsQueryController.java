@@ -110,7 +110,7 @@ public class NewsQueryController {
         log.info("[DIAG][mysql][by-ids] 开始查询，idsCount={}, idsSample={}",
                 request.getIds().size(), summarizeIds(request.getIds()));
 
-        List<News> newsList = newsMapper.selectBatchIds(request.getIds());
+        List<News> newsList = newsMapper.selectCardsByIds(request.getIds());
         Map<Long, String> categoryNameMap = loadCategoryNameMap(
                 newsList.stream().map(News::getCategory_id).collect(Collectors.toSet())
         );
@@ -175,6 +175,7 @@ public class NewsQueryController {
                 .content(news.getContext())
                 .source(news.getSource())
                 .publishedAt(publishedAt)
+                .imageUrl(storageService.getAccessUrl(news.getImage_url()))
                 .categoryId(news.getCategory_id())
                 .categoryName(resolveCategoryName(news.getCategory_id(), categoryNameMap))
                 .build();
