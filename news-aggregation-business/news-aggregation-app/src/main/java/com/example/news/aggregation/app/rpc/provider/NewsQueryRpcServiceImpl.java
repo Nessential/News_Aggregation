@@ -1,11 +1,14 @@
 package com.example.news.aggregation.app.rpc.provider;
 
 import com.example.news.aggregation.news.domain.entity.News;
+import com.example.news.aggregation.news.domain.entity.NewsCategory;
 import com.example.news.aggregation.news.dto.ArticlesResponse;
 import com.example.news.aggregation.news.dto.IdsRequest;
 import com.example.news.aggregation.news.dto.NewsArticleDto;
+import com.example.news.aggregation.news.infrastructure.mapper.NewsCategoryMapper;
 import com.example.news.aggregation.news.infrastructure.mapper.NewsMapper;
 import com.example.news.aggregation.rpc.api.NewsQueryRpcService;
+import com.example.news.aggregation.storage.service.StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +18,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -28,6 +34,8 @@ public class NewsQueryRpcServiceImpl implements NewsQueryRpcService {
             .withZone(ZoneId.systemDefault());
 
     private final NewsMapper newsMapper;
+    private final NewsCategoryMapper newsCategoryMapper;
+    private final StorageService storageService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -40,9 +48,12 @@ public class NewsQueryRpcServiceImpl implements NewsQueryRpcService {
                         .articles(Collections.emptyList())
                         .build();
             }
-            List<News> newsList = newsMapper.selectBatchIds(idsRequest.getIds());
+            List<News> newsList = newsMapper.selectCardsByIds(idsRequest.getIds());
+            Map<Long, String> categoryNameMap = loadCategoryNameMap(
+                    newsList.stream().map(News::getCategory_id).collect(Collectors.toSet())
+            );
             List<NewsArticleDto> articles = newsList.stream()
-                    .map(this::toDto)
+                    .map(news -> toDto(news, categoryNameMap))
                     .collect(Collectors.toList());
             ArticlesResponse response = ArticlesResponse.builder().articles(articles).build();
             return objectMapper.convertValue(response, com.example.news.aggregation.rpc.contract.news.ArticlesResponse.class);
@@ -54,7 +65,7 @@ public class NewsQueryRpcServiceImpl implements NewsQueryRpcService {
         }
     }
 
-    private NewsArticleDto toDto(News news) {
+    private NewsArticleDto toDto(News news, Map<Long, String> categoryNameMap) {
         if (news == null) {
             return null;
         }
@@ -68,6 +79,28 @@ public class NewsQueryRpcServiceImpl implements NewsQueryRpcService {
                 .content(news.getContext())
                 .source(news.getSource())
                 .publishedAt(publishedAt)
+                .imageUrl(storageService.getAccessUrl(news.getImage_url()))
+                .categoryId(news.getCategory_id())
+                .categoryName(resolveCategoryName(news.getCategory_id(), categoryNameMap))
                 .build();
+    }
+
+    private Map<Long, String> loadCategoryNameMap(Set<Long> categoryIds) {
+        if (categoryIds == null || categoryIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<NewsCategory> categories = newsCategoryMapper.selectBatchIds(new HashSet<>(categoryIds));
+        if (categories == null || categories.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return categories.stream()
+                .collect(Collectors.toMap(NewsCategory::getId, NewsCategory::getName, (a, b) -> a));
+    }
+
+    private String resolveCategoryName(Long categoryId, Map<Long, String> categoryNameMap) {
+        if (categoryId == null || categoryNameMap == null) {
+            return null;
+        }
+        return categoryNameMap.get(categoryId);
     }
 }

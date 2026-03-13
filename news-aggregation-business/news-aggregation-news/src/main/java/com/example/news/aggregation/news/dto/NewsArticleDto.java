@@ -20,6 +20,7 @@ public class NewsArticleDto {
     private String content;
     private String source;
     private String publishedAt;
+    private String imageUrl;
     private Long categoryId;
     private String categoryName;
 }

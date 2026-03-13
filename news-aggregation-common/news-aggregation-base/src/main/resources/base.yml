@@ -14,8 +14,9 @@ news:
       password: ${REDIS_PASSWORD:}
     # XXL-Job配置
     xxl-job:
+      enable: ${XXL_JOB_ENABLE:false}
       admin-addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:8090/xxl-job-admin}
-      access-token: ${XXL_JOB_ACCESS_TOKEN:}
+      access-token: ${XXL_JOB_ACCESS_TOKEN:default_token}
       executor-appname: ${XXL_JOB_EXECUTOR_APPNAME:news-aggregation-executor}
       executor-port: ${XXL_JOB_EXECUTOR_PORT:9999}
       executor-ip: ${XXL_JOB_EXECUTOR_IP:127.0.0.1}

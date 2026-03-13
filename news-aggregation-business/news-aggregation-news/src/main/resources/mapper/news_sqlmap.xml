@@ -41,6 +41,24 @@
         select * from news where link = #{link} and deleted = 0 limit 1
     </select>
 
+    <select id="selectCardsByIds" resultMap="resultNewsMap">
+        SELECT
+            id,
+            title,
+            image_url,
+            link,
+            source,
+            publication_time,
+            context,
+            category_id
+        FROM news
+        WHERE deleted = 0
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
 
     <!-- 查询待翻译的新闻（正文已抓取成功，翻译未完成） -->
     <select id="selectForTranslation" resultMap="resultNewsMap">

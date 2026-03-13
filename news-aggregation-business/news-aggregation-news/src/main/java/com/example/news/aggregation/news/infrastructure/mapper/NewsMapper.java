@@ -19,6 +19,8 @@ public interface NewsMapper extends BaseMapper<News> {
 
     News selectByLink(@Param("link") String link);
 
+    List<News> selectCardsByIds(@Param("ids") List<Long> ids);
+
     List<News> selectForTranslation(int batchSize);
 
     List<News> selectForVectorization(@Param("batchSize") int batchSize);
