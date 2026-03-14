@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @ConditionalOnProperty(name = "xxl.job.admin.addresses")
-@ConditionalOnProperty(name = "news.aggregation.xxl-job.enable", havingValue = "true")
+@ConditionalOnProperty(name = "news.aggregation.xxl-job.module-enabled", havingValue = "true")
 public class XxlJobConfig {
     private Logger logger = LoggerFactory.getLogger(XxlJobConfig.class);
 

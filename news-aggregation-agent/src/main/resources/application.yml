@@ -12,6 +12,7 @@ spring:
       - classpath:base.yml
       - classpath:cache.yml
       - classpath:datasource.yml
+      - classpath:vector.yml
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:}

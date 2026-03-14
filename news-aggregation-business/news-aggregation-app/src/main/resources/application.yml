@@ -28,7 +28,7 @@ app:
 news:
   aggregation:
     xxl-job:
-      enable: true
+      module-enabled: true
 
 # MyBatis
 mybatis-plus:
