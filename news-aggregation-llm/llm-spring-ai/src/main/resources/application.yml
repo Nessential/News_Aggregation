@@ -125,6 +125,7 @@ dubbo:
   protocol:
     name: tri
     port: ${DUBBO_PORT:20881}
+    host: ${DUBBO_IP_TO_BIND:${DUBBO_IP_TO_REGISTRY:}}
   registry:
     address: nacos://${NACOS_ADDR:localhost:8849}
     username: ${NACOS_USERNAME:}
@@ -133,6 +134,7 @@ dubbo:
       namespace: ${NACOS_NAMESPACE:news-agent}
       register-consumer-url: true
   provider:
+    host: ${DUBBO_IP_TO_REGISTRY:${DUBBO_IP_TO_BIND:}}
     filter: userContextProvider
   consumer:
     check: false
