@@ -12,6 +12,7 @@
 - 基于 Dubbo + Nacos 的服务注册与发现
 - 基于 XXL-Job 的定时任务调度
 
+![img.png](img.png)
 ## 技术栈
 
 - Java 21
@@ -27,6 +28,16 @@
 - XXL-Job 3.3.0
 - Spring AI Alibaba 
 
+
+## TO-DO-LIST
+
+
+- [ ] 接入支付解锁限额
+- [ ] 多会话切换
+- [ ] SSE调用
+- [ ] 生成小红书文案
+- [ ] 文生图
+- [ ] 文生视频
 ## 项目结构
 
 ```text
