@@ -12,7 +12,7 @@
 - 基于 Dubbo + Nacos 的服务注册与发现
 - 基于 XXL-Job 的定时任务调度
 
-![img.png](img.png)
+![项目Logo](https://github.com/Nessential/News_Aggregation/blob/main/presentation%20.png)
 ## 技术栈
 
 - Java 21
